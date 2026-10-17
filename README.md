@@ -1,0 +1,171 @@
+# DBA POC — Local Multi-Agent Connectivity Troubleshooting Assistant
+
+A fully local, open-source proof of concept of an **enterprise AI agent platform**.
+A customer support expert chats with an AI assistant that diagnoses a customer's
+*"no internet"* problem end-to-end: it measures the line, routes the case to the right
+specialist agent, follows the official troubleshooting procedure (SOP), asks for human
+approval before risky actions, and books an engineer or opens a ticket when needed.
+
+Everything runs on a laptop with `docker compose` — no cloud, no hosted LLM, no licensed tools.
+
+> **Disclaimer** — This is a clean-room demo. The telecom operator **"NetCo"**, its customers,
+> devices, procedures and backend systems are fictional and simulated. No proprietary code,
+> prompts or data from any company are included.
+
+---
+
+## What it demonstrates
+
+| Capability | How it shows up in the product |
+|---|---|
+| Multi-agent architecture | Orchestrator + In-Home, Access-PON, Access-P2P and Access-Copper specialist agents |
+| Agent orchestration | Carrier-aware routing, agent hand-over and fallback reasoning in LangGraph |
+| MCP | Five MCP servers (diagnostics, installed base, scheduling, ticketing, knowledge) over streamable HTTP |
+| Tool calling | Agents call diagnostic and fulfilment tools on a simulated network |
+| RAG & knowledge search | Hybrid (keyword + vector) search over SOP documents with citations |
+| Document processing | SOPs (Markdown / PDF / DOCX) parsed and chunked with Docling |
+| Workflow execution | SOP procedures executed step by step as a deterministic graph |
+| Human-in-the-loop | Expert approves device reboots, Wi-Fi resets, engineer visits and swap orders |
+| Memory | Conversation checkpoints, session context and long-term customer memory |
+| Observability | LLM/agent traces in Langfuse, distributed traces in Jaeger |
+| Local LLM | Qwen3 + bge-m3 served by Ollama (CPU or GPU) |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    CE(["Support Expert"]) -->|"request"| UI["chat-ui"]
+    UI -->|"REST"| ORC["orchestrator-agent"]
+    ORC --> QS["quickscan-service"]
+    ORC --> IH["inhome-agent"]
+    ORC --> PON["access-pon-agent"]
+    ORC --> P2P["access-p2p-agent"]
+    ORC --> CU["access-copper-agent"]
+    subgraph MCP["MCP servers"]
+        DIAG["network-diagnostics-mcp"]
+        IB["installed-base-mcp"]
+        SCH["scheduling-mcp"]
+        TIC["ticketing-mcp"]
+        KB["knowledge-mcp"]
+    end
+    QS --> IB
+    QS --> DIAG
+    IH --> DIAG
+    IH --> KB
+    PON --> DIAG
+    PON --> KB
+    P2P --> KB
+    CU --> KB
+    ORC --> SCH
+    ORC --> TIC
+    DIAG --> SIM["network-simulator"]
+    KB --> PG[("postgres + pgvector")]
+    ORC --> LLM["ollama"]
+    ORC ==>|"SSE response"| UI
+    UI ==>|"answer + approvals"| CE
+```
+
+Detailed diagrams and design decisions will be added under `docs/` as the steps progress.
+
+## Repository layout (target)
+
+```text
+dba-poc/
+├── services/
+│   ├── chat-ui/                      # Streamlit expert console
+│   ├── orchestrator-agent/           # FastAPI + LangGraph supervisor, SSE
+│   ├── quickscan-service/            # Initial line measurements
+│   ├── agents/                       # inhome | access-pon | access-p2p | access-copper
+│   ├── mcp/                          # network-diagnostics | installed-base | scheduling | ticketing | knowledge
+│   ├── network-simulator/            # Stateful fake network with scenario customers
+│   └── kb-ingestion/                 # Docling SOP ingestion worker
+├── libs/poc-common/                  # Shared: settings, LLM factory, MCP client, events, logging
+├── knowledge/sop/                    # SOP documents (source of truth for RAG)
+├── data/scenarios/                   # Fictional customers and fault scenarios
+├── infra/                            # Postgres init, Langfuse, Traefik, Keycloak config
+├── evaluation/                       # Golden question sets and RAG/agent evaluation
+├── scripts/                          # setup / demo helpers (PowerShell + bash)
+├── docs/                             # Architecture, ADRs, demo script
+└── docker-compose.yml
+```
+
+## Quick start
+
+> Available from milestone **M1**. Until then, see the roadmap below.
+
+```bash
+git clone https://github.com/developer47-ai/dba-poc.git
+cd dba-poc
+cp .env.example .env
+docker compose up -d
+# open http://localhost:8501 and pick a scenario customer
+```
+
+**Requirements:** a Docker-compatible runtime (Rancher Desktop, Docker Engine or Podman),
+16 GB RAM minimum (32 GB recommended), ~25 GB free disk. A GPU is optional.
+
+## Roadmap
+
+Built step by step; each step is one pull request and ends in something you can run.
+
+### Phase A — Foundation
+- [x] **Step 0 — Repository foundation**: license, git hygiene, secret scanning, roadmap
+- [ ] **Step 1 — Local platform**: container runtime, `docker-compose.yml` with Ollama, Postgres + pgvector, Valkey; model pull; health checks
+- [ ] **Step 2 — Shared library** `poc-common`: settings, OpenAI-compatible LLM factory, MCP client, event models, structured logging with correlation IDs
+
+### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat**
+- [ ] **Step 3 — Network simulator + `network-diagnostics-mcp`** with scenario customers
+- [ ] **Step 4 — `inhome-agent`** (minimal LangGraph agent with tool calling)
+- [ ] **Step 5 — `orchestrator-agent`** (FastAPI, SSE streaming, single route)
+- [ ] **Step 6 — `chat-ui`** (session start, streaming answers)
+
+### Phase C — Knowledge & process → **M2: SOP-guided troubleshooting with citations**
+- [ ] **Step 7 — SOP library + `kb-ingestion` + `knowledge-mcp`** (hybrid search, SOP step graph)
+- [ ] **Step 8 — SOP-guided agents** (follow steps, cite `sop_id/step_id`, no-SOP fallback)
+
+### Phase D — Full multi-agent platform → **M3: all scenarios**
+- [ ] **Step 9 — `installed-base-mcp` + `quickscan-service`**
+- [ ] **Step 10 — Access PON / P2P / Copper agents**, carrier routing and agent hand-over
+- [ ] **Step 11 — Human-in-the-loop**: consent, `scheduling-mcp`, `ticketing-mcp`, approval UI
+- [ ] **Step 12 — Memory**: Postgres checkpointer, session cache, customer memory
+
+### Phase E — Operate & share → **v0.1.0 release**
+- [ ] **Step 13 — Observability**: Langfuse, OpenTelemetry, Jaeger, feedback scores
+- [ ] **Step 14 — Guardrails & identity**: input guardrails, scope gate, optional Traefik + Keycloak
+- [ ] **Step 15 — Evaluation & CI**: golden sets, RAG metrics, GitHub Actions
+- [ ] **Step 16 — Visitor packaging**: one-command setup, demo script, screenshots, release
+
+## Planned demo scenarios
+
+| Scenario customer | Fault | Agents involved | Human approval |
+|---|---|---|---|
+| Fiber / GPON — LOS red | No optical signal | Access-PON | Engineer appointment |
+| Fiber — modem offline | Router hung | In-Home | Remote reboot |
+| Fiber — Wi-Fi misconfigured | Wrong Wi-Fi settings | In-Home | Wi-Fi reset |
+| Copper — PPP session down | Line OK, modem fault | Access-Copper → In-Home | Modem swap order |
+| P2P — link down | Access port down | Access-P2P | Incident ticket |
+
+## Tech stack
+
+| Layer | Technology | License |
+|---|---|---|
+| LLM runtime | Ollama (Qwen3, bge-m3) | MIT / Apache-2.0 |
+| Agents & workflows | LangGraph, LangChain | MIT |
+| Tool protocol | MCP Python SDK / FastMCP | MIT |
+| API | FastAPI | MIT |
+| UI | Streamlit | Apache-2.0 |
+| Database & vectors | PostgreSQL + pgvector | PostgreSQL |
+| Cache | Valkey | BSD-3 |
+| Document processing | Docling | MIT |
+| Observability | Langfuse, OpenTelemetry, Jaeger | MIT / Apache-2.0 |
+| Gateway & identity (optional) | Traefik, Keycloak | MIT / Apache-2.0 |
+
+## Contributing
+
+1. `pip install pre-commit && pre-commit install` — blocks secrets and large files.
+2. One step = one branch = one pull request.
+3. Never commit real customer data, company code, internal URLs or credentials.
+
+## License
+
+[MIT](LICENSE) © 2026 Ayush Kumar

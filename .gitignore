@@ -1,0 +1,52 @@
+# --- Secrets & local config -------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.pfx
+secrets/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Runtime data (Docker volumes bind-mounted locally) ----------------------
+/.data/
+/volumes/
+*.sqlite
+*.db
+
+# --- Models & large artifacts (root only, so code packages named models/ stay tracked)
+/models/
+*.gguf
+*.safetensors
+*.bin
+
+# --- Evaluation outputs ------------------------------------------------------
+evaluation/results/
+
+# --- Logs --------------------------------------------------------------------
+logs/
+*.log
+
+# --- IDE / OS ----------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
