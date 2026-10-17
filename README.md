@@ -91,15 +91,24 @@ dba-poc/
 
 ## Quick start
 
-> Available from milestone **M1**. Until then, see the roadmap below.
+The platform layer (LLM, database, cache) is available now; the chat UI arrives in milestone **M1**.
 
 ```bash
 git clone https://github.com/developer47-ai/dba-poc.git
 cd dba-poc
-cp .env.example .env
-docker compose up -d
-# open http://localhost:8501 and pick a scenario customer
+docker compose up -d            # first start downloads ~3.5 GB of models (a few minutes)
+./scripts/smoke-test.sh         # Windows: .\scripts\smoke-test.ps1
 ```
+
+All settings have working defaults. To override them (for example `OLLAMA_CHAT_MODEL=qwen3:8b`),
+create a `.env` file next to `docker-compose.yml`; see the variables used in the compose file.
+NVIDIA GPU users: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`.
+
+| Service | Port (localhost only) | Purpose |
+|---|---|---|
+| Ollama | 11434 | Local LLM, OpenAI-compatible API at `/v1` |
+| PostgreSQL + pgvector | 5432 | Data and vector search (user `dba`, db `dba`) |
+| Valkey | 6379 | Cache and rate limits |
 
 **Requirements:** a Docker-compatible runtime (Rancher Desktop, Docker Engine or Podman),
 16 GB RAM minimum (32 GB recommended), ~25 GB free disk. A GPU is optional.
@@ -110,7 +119,7 @@ Built step by step; each step is one pull request and ends in something you can 
 
 ### Phase A — Foundation
 - [x] **Step 0 — Repository foundation**: license, git hygiene, secret scanning, roadmap
-- [ ] **Step 1 — Local platform**: container runtime, `docker-compose.yml` with Ollama, Postgres + pgvector, Valkey; model pull; health checks
+- [x] **Step 1 — Local platform**: `docker-compose.yml` with Ollama, Postgres + pgvector, Valkey; automatic model pull; health checks; smoke test
 - [ ] **Step 2 — Shared library** `poc-common`: settings, OpenAI-compatible LLM factory, MCP client, event models, structured logging with correlation IDs
 
 ### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat**

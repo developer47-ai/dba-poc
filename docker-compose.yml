@@ -1,0 +1,83 @@
+# DBA POC - local platform (Step 1): LLM runtime, database, cache.
+# Usage:  docker compose up -d        then        ./scripts/smoke-test.ps1  (or .sh)
+
+name: dba-poc
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.6
+    container_name: dba-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-2}
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 10s
+
+  # One-shot job: downloads the chat and embedding models into the ollama volume.
+  ollama-init:
+    image: ollama/ollama:0.40.6
+    container_name: dba-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:4b}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Pulling chat model: $$OLLAMA_CHAT_MODEL"
+        ollama pull "$$OLLAMA_CHAT_MODEL"
+        echo "Pulling embedding model: $$OLLAMA_EMBED_MODEL"
+        ollama pull "$$OLLAMA_EMBED_MODEL"
+        echo "Models ready."
+
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg17
+    container_name: dba-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dba}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dba_local_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-dba}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  valkey:
+    image: valkey/valkey:9.0.6-alpine
+    container_name: dba-valkey
+    restart: unless-stopped
+    command: ["valkey-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ollama_models:
+  postgres_data:
