@@ -1,0 +1,43 @@
+customer_id: C1002
+name: Bram Jansen
+description: Fiber (XGSPON) customer whose modem is stuck and cannot re-establish the PPP session. A remote reboot fixes it.
+address: { street: Proefweg 7, zip: 3511 CD, city: Utrecht }
+carrier_type: fiber
+carrier_tech_type: XGSPON
+internet_service: { status: active, is_new_service: false }
+equipment:
+  ont: { model: FibreLink ONT-200, serial: FL200-0002 }
+  modem: { model: NetCo Hub 3, serial: NH3-2002, firmware: 3.9.4 }
+wifi_sticker: { ssid: NetCo-1002, password: sticker-1002-pass, security: WPA2, channel: 11, enabled: true }
+
+state:
+  olt_port: { status: up }
+  ont:
+    optical_signal: true
+    rx_power_dbm: -18.4
+    leds: { power: green, pon: green, los: "off" }
+  access_port: null
+  ppp:
+    status: down
+    last_change: "2026-10-17T18:40:00Z"
+    history:
+      - { timestamp: "2026-10-17T18:40:00Z", status: down, reason: "authentication timeout" }
+      - { timestamp: "2026-09-17T07:11:00Z", status: up, reason: "session established" }
+  modem:
+    online: true
+    uptime_s: 2592000
+    hardware_fault: false
+    reboot_count: 0
+    leds: { power: green, wan: green, internet: orange, wifi: green }
+  wifi: { ssid: NetCo-1002, security: WPA2, channel: 11, enabled: true }
+  devices:
+    - { name: Bram's phone, type: phone, mac: "aa:bb:cc:10:02:01", connected: true, band: 2.4GHz, rssi_dbm: -61 }
+    - { name: Desktop PC, type: pc, mac: "aa:bb:cc:10:02:02", connected: true, band: ethernet, rssi_dbm: null }
+
+remedies:
+  - action: reboot_device
+    target: modem
+    patch:
+      ppp: { status: up }
+      modem:
+        leds: { internet: green }

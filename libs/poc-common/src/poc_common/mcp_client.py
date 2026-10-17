@@ -85,6 +85,11 @@ async def list_tools(url: str, *, correlation_id: str | None = None) -> list[dic
     async with mcp_session(url, correlation_id=correlation_id) as session:
         response = await session.list_tools()
     return [
-        {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema}
+        {
+            "name": t.name,
+            "description": t.description or "",
+            "input_schema": t.inputSchema,
+            "annotations": t.annotations.model_dump(exclude_none=True) if t.annotations else {},
+        }
         for t in response.tools
     ]

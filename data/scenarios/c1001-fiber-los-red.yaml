@@ -1,0 +1,37 @@
+customer_id: C1001
+name: Anna de Vries
+description: Fiber (GPON) customer with no optical signal at the ONT. Not fixable remotely; needs an engineer.
+address: { street: Voorbeeldstraat 12, zip: 1011 AB, city: Amsterdam }
+carrier_type: fiber
+carrier_tech_type: GPON
+internet_service: { status: active, is_new_service: false }
+equipment:
+  ont: { model: FibreLink ONT-100, serial: FL100-0001 }
+  modem: { model: NetCo Hub 4, serial: NH4-1001, firmware: 4.2.1 }
+wifi_sticker: { ssid: NetCo-1001, password: sticker-1001-pass, security: WPA2, channel: 6, enabled: true }
+
+state:
+  olt_port: { status: down }
+  ont:
+    optical_signal: false
+    rx_power_dbm: null
+    leds: { power: green, pon: "off", los: red }
+  access_port: null
+  ppp:
+    status: down
+    last_change: "2026-10-17T21:14:00Z"
+    history:
+      - { timestamp: "2026-10-17T21:14:00Z", status: down, reason: "no optical signal" }
+      - { timestamp: "2026-10-12T08:02:00Z", status: up, reason: "session established" }
+  modem:
+    online: true
+    uptime_s: 604800
+    hardware_fault: false
+    reboot_count: 0
+    leds: { power: green, wan: red, internet: "off", wifi: green }
+  wifi: { ssid: NetCo-1001, security: WPA2, channel: 6, enabled: true }
+  devices:
+    - { name: Living-room TV, type: tv, mac: "aa:bb:cc:10:01:01", connected: true, band: 5GHz, rssi_dbm: -55 }
+    - { name: Anna's laptop, type: laptop, mac: "aa:bb:cc:10:01:02", connected: true, band: 5GHz, rssi_dbm: -48 }
+
+remedies: []

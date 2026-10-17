@@ -3,16 +3,18 @@ name = "dba-poc"
 version = "0.1.0"
 description = "Local multi-agent connectivity troubleshooting POC (workspace root)"
 requires-python = ">=3.12"
-dependencies = ["poc-common"]
+dependencies = ["poc-common", "network-simulator", "network-diagnostics-mcp"]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["libs/*"]
+members = ["libs/*", "services/network-simulator", "services/mcp/*"]
 
 [tool.uv.sources]
 poc-common = { workspace = true }
+network-simulator = { workspace = true }
+network-diagnostics-mcp = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -23,6 +25,7 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"
 testpaths = ["libs", "services"]
 
 [tool.ruff]
@@ -33,4 +36,4 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["poc_common"]
+known-first-party = ["poc_common", "network_simulator", "network_diagnostics_mcp"]

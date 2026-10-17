@@ -1,0 +1,38 @@
+customer_id: C1005
+name: Eva Smit
+description: Point-to-point fiber (EoF) customer whose access port on the aggregation switch is down. Needs an incident ticket.
+address: { street: Demolaan 88, zip: 5611 IJ, city: Eindhoven }
+carrier_type: fiber
+carrier_tech_type: EOF
+internet_service: { status: active, is_new_service: false }
+equipment:
+  ont: null
+  modem: { model: NetCo Hub 4, serial: NH4-1005, firmware: 4.2.1 }
+wifi_sticker: { ssid: NetCo-1005, password: sticker-1005-pass, security: WPA2, channel: 6, enabled: true }
+
+state:
+  olt_port: null
+  ont: null
+  access_port:
+    kind: p2p_switch
+    status: down
+    sync_down_mbps: null
+    sync_up_mbps: null
+    snr_margin_db: null
+  ppp:
+    status: down
+    last_change: "2026-10-17T23:30:00Z"
+    history:
+      - { timestamp: "2026-10-17T23:30:00Z", status: down, reason: "access link down" }
+      - { timestamp: "2026-10-15T11:00:00Z", status: up, reason: "session established" }
+  modem:
+    online: true
+    uptime_s: 777600
+    hardware_fault: false
+    reboot_count: 0
+    leds: { power: green, wan: red, internet: "off", wifi: green }
+  wifi: { ssid: NetCo-1005, security: WPA2, channel: 6, enabled: true }
+  devices:
+    - { name: Eva's tablet, type: tablet, mac: "aa:bb:cc:10:05:01", connected: true, band: 5GHz, rssi_dbm: -50 }
+
+remedies: []

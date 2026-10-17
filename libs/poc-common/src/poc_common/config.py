@@ -29,6 +29,9 @@ class Config(BaseSettings):
     database_url: str = "postgresql://dba:dba_local_pw@localhost:5432/dba"
     valkey_url: str = "redis://localhost:6379/0"
 
+    # Backend systems (simulated)
+    network_simulator_url: str = "http://localhost:8300"
+
     # MCP servers (streamable HTTP)
     diagnostics_mcp_url: str = "http://localhost:8101/mcp"
     installed_base_mcp_url: str = "http://localhost:8102/mcp"

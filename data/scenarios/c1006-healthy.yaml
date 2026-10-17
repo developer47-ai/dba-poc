@@ -1,0 +1,35 @@
+customer_id: C1006
+name: Femke Mulder
+description: Healthy control customer. Fiber (GPON), everything works; no fault should be found.
+address: { street: Controleweg 5, zip: 6811 KL, city: Arnhem }
+carrier_type: fiber
+carrier_tech_type: GPON
+internet_service: { status: active, is_new_service: false }
+equipment:
+  ont: { model: FibreLink ONT-100, serial: FL100-0006 }
+  modem: { model: NetCo Hub 4, serial: NH4-1006, firmware: 4.2.1 }
+wifi_sticker: { ssid: NetCo-1006, password: sticker-1006-pass, security: WPA2, channel: 6, enabled: true }
+
+state:
+  olt_port: { status: up }
+  ont:
+    optical_signal: true
+    rx_power_dbm: -16.2
+    leds: { power: green, pon: green, los: "off" }
+  access_port: null
+  ppp:
+    status: up
+    last_change: "2026-09-30T05:00:00Z"
+    history:
+      - { timestamp: "2026-09-30T05:00:00Z", status: up, reason: "session established" }
+  modem:
+    online: true
+    uptime_s: 1641600
+    hardware_fault: false
+    reboot_count: 0
+    leds: { power: green, wan: green, internet: green, wifi: green }
+  wifi: { ssid: NetCo-1006, security: WPA2, channel: 6, enabled: true }
+  devices:
+    - { name: Femke's laptop, type: laptop, mac: "aa:bb:cc:10:06:01", connected: true, band: 5GHz, rssi_dbm: -45 }
+
+remedies: []

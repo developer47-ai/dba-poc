@@ -123,7 +123,7 @@ Built step by step; each step is one pull request and ends in something you can 
 - [x] **Step 2 — Shared library** `poc-common`: config, OpenAI-compatible LLM factory, MCP client, event models, structured logging with correlation IDs
 
 ### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat**
-- [ ] **Step 3 — Network simulator + `network-diagnostics-mcp`** with scenario customers
+- [x] **Step 3 — Network simulator + `network-diagnostics-mcp`** with scenario customers
 - [ ] **Step 4 — `inhome-agent`** (minimal LangGraph agent with tool calling)
 - [ ] **Step 5 — `orchestrator-agent`** (FastAPI, SSE streaming, single route)
 - [ ] **Step 6 — `chat-ui`** (session start, streaming answers)
@@ -146,13 +146,19 @@ Built step by step; each step is one pull request and ends in something you can 
 
 ## Planned demo scenarios
 
-| Scenario customer | Fault | Agents involved | Human approval |
-|---|---|---|---|
-| Fiber / GPON — LOS red | No optical signal | Access-PON | Engineer appointment |
-| Fiber — modem offline | Router hung | In-Home | Remote reboot |
-| Fiber — Wi-Fi misconfigured | Wrong Wi-Fi settings | In-Home | Wi-Fi reset |
-| Copper — PPP session down | Line OK, modem fault | Access-Copper → In-Home | Modem swap order |
-| P2P — link down | Access port down | Access-P2P | Incident ticket |
+Fictional customers live in [`data/scenarios/`](data/scenarios); the
+[network simulator](services/network-simulator) keeps their live state and the
+[diagnostics MCP server](services/mcp/network-diagnostics) exposes 12 tools on top of it
+(9 read-only, 3 that change state and will need human approval).
+
+| Customer | Fault | Agents involved | Remote fix? | Human approval |
+|---|---|---|---|---|
+| C1001 fiber GPON, LOS red | No optical signal | Access-PON | No | Engineer appointment |
+| C1002 fiber XGSPON, modem stuck | PPP session stuck | In-Home | Reboot modem | Remote reboot |
+| C1003 fiber GPON, Wi-Fi changed | Wrong Wi-Fi settings | In-Home | Reset Wi-Fi | Wi-Fi reset |
+| C1004 copper VDSL, modem faulty | Hardware fault | Access-Copper → In-Home | No | Modem swap order |
+| C1005 fiber EoF, port down | Access port down | Access-P2P | No | Incident ticket |
+| C1006 fiber GPON, healthy | None (control) | In-Home | – | – |
 
 ## Tech stack
 

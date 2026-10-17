@@ -1,0 +1,36 @@
+customer_id: C1003
+name: Chantal Bakker
+description: Fiber (GPON) customer whose Wi-Fi was changed to a hidden, wrong configuration. Internet is up, but devices cannot connect. A Wi-Fi reset fixes it.
+address: { street: Teststraat 3, zip: 2511 EF, city: Den Haag }
+carrier_type: fiber
+carrier_tech_type: GPON
+internet_service: { status: active, is_new_service: false }
+equipment:
+  ont: { model: FibreLink ONT-100, serial: FL100-0003 }
+  modem: { model: NetCo Hub 4, serial: NH4-1003, firmware: 4.2.1 }
+wifi_sticker: { ssid: NetCo-1003, password: sticker-1003-pass, security: WPA2, channel: 1, enabled: true }
+
+state:
+  olt_port: { status: up }
+  ont:
+    optical_signal: true
+    rx_power_dbm: -17.9
+    leds: { power: green, pon: green, los: "off" }
+  access_port: null
+  ppp:
+    status: up
+    last_change: "2026-10-01T06:30:00Z"
+    history:
+      - { timestamp: "2026-10-01T06:30:00Z", status: up, reason: "session established" }
+  modem:
+    online: true
+    uptime_s: 1468800
+    hardware_fault: false
+    reboot_count: 0
+    leds: { power: green, wan: green, internet: green, wifi: orange }
+  wifi: { ssid: Hidden-Net, security: WPA3, channel: 13, enabled: true, hidden: true }
+  devices:
+    - { name: Chantal's laptop, type: laptop, mac: "aa:bb:cc:10:03:01", connected: false, band: null, rssi_dbm: null }
+    - { name: Smart speaker, type: speaker, mac: "aa:bb:cc:10:03:02", connected: false, band: null, rssi_dbm: null }
+
+remedies: []

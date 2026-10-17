@@ -1,0 +1,38 @@
+customer_id: C1004
+name: Daan Visser
+description: Copper (VDSL) customer. The line synchronises fine, but the modem hardware is faulty and no PPP session starts. Only a modem swap helps.
+address: { street: Oefenlaan 21, zip: 9711 GH, city: Groningen }
+carrier_type: copper
+carrier_tech_type: VDSL
+internet_service: { status: active, is_new_service: false }
+equipment:
+  ont: null
+  modem: { model: NetCo Hub 2, serial: NH2-3004, firmware: 2.8.0 }
+wifi_sticker: { ssid: NetCo-1004, password: sticker-1004-pass, security: WPA2, channel: 6, enabled: true }
+
+state:
+  olt_port: null
+  ont: null
+  access_port:
+    kind: dslam
+    status: up
+    sync_down_mbps: 98.2
+    sync_up_mbps: 21.0
+    snr_margin_db: 9.8
+  ppp:
+    status: down
+    last_change: "2026-10-16T22:05:00Z"
+    history:
+      - { timestamp: "2026-10-16T22:05:00Z", status: down, reason: "no PADO response from CPE" }
+      - { timestamp: "2026-10-16T22:01:00Z", status: down, reason: "CPE reset" }
+      - { timestamp: "2026-10-09T09:20:00Z", status: up, reason: "session established" }
+  modem:
+    online: true
+    uptime_s: 4200
+    hardware_fault: true
+    reboot_count: 0
+    leds: { power: orange, wan: green, internet: "off", wifi: "off" }
+  wifi: { ssid: NetCo-1004, security: WPA2, channel: 6, enabled: false }
+  devices: []
+
+remedies: []
