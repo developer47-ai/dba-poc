@@ -3,18 +3,19 @@ name = "dba-poc"
 version = "0.1.0"
 description = "Local multi-agent connectivity troubleshooting POC (workspace root)"
 requires-python = ">=3.12"
-dependencies = ["poc-common", "network-simulator", "network-diagnostics-mcp"]
+dependencies = ["poc-common", "network-simulator", "network-diagnostics-mcp", "inhome-agent"]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["libs/*", "services/network-simulator", "services/mcp/*"]
+members = ["libs/*", "services/network-simulator", "services/mcp/*", "services/agents/*"]
 
 [tool.uv.sources]
 poc-common = { workspace = true }
 network-simulator = { workspace = true }
 network-diagnostics-mcp = { workspace = true }
+inhome-agent = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -27,6 +28,7 @@ dev = [
 asyncio_mode = "auto"
 addopts = "--import-mode=importlib"
 testpaths = ["libs", "services"]
+markers = ["llm: needs a running Ollama and the models (set RUN_LLM_TESTS=1)"]
 
 [tool.ruff]
 line-length = 100
@@ -36,4 +38,4 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["poc_common", "network_simulator", "network_diagnostics_mcp"]
+known-first-party = ["poc_common", "network_simulator", "network_diagnostics_mcp", "inhome_agent"]
