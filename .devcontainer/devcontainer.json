@@ -1,0 +1,29 @@
+{
+  "name": "DBA POC",
+  "image": "mcr.microsoft.com/devcontainers/python:3-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {}
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "postCreateCommand": "python -m pip install --user --quiet uv && python -m uv sync --python 3.12 --extra llm --all-packages",
+  "postStartCommand": "echo 'Start the platform with: docker compose up -d   then: bash scripts/smoke-test.sh'",
+  "forwardPorts": [8501, 8000, 11434],
+  "portsAttributes": {
+    "8501": { "label": "Chat UI", "onAutoForward": "openBrowser" },
+    "8000": { "label": "Orchestrator API", "onAutoForward": "silent" },
+    "11434": { "label": "Ollama", "onAutoForward": "silent" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}

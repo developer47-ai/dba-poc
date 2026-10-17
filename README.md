@@ -1,5 +1,9 @@
 # DBA POC — Local Multi-Agent Connectivity Troubleshooting Assistant
 
+[![CI](https://github.com/developer47-ai/dba-poc/actions/workflows/ci.yml/badge.svg)](https://github.com/developer47-ai/dba-poc/actions/workflows/ci.yml)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/developer47-ai/dba-poc?quickstart=1)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A fully local, open-source proof of concept of an **enterprise AI agent platform**.
 A customer support expert chats with an AI assistant that diagnoses a customer's
 *"no internet"* problem end-to-end: it measures the line, routes the case to the right
@@ -112,6 +116,18 @@ NVIDIA GPU users: `docker compose -f docker-compose.yml -f docker-compose.gpu.ym
 
 **Requirements:** a Docker-compatible runtime (Rancher Desktop, Docker Engine or Podman),
 16 GB RAM minimum (32 GB recommended), ~25 GB free disk. A GPU is optional.
+
+### Ways to run it
+
+| Where | How | Best for |
+|---|---|---|
+| **GitHub Codespaces** (no install) | Click the *Open in GitHub Codespaces* badge (4 cores / 16 GB), then `docker compose up -d` and `bash scripts/smoke-test.sh` in its terminal | Trying it from any browser |
+| **Your machine with Docker** | The commands above | Full speed, recording demos |
+| **Python only, no Docker** | `uv sync --python 3.12 --extra llm --all-packages` then `uv run pytest` | Developing services; tests use a scripted model |
+| **Python + native Ollama** | Install [Ollama](https://ollama.com/download), `ollama pull qwen3:4b` and `ollama pull bge-m3`, then `RUN_LLM_TESTS=1 uv run pytest -m llm` | Agent work against the real local model when containers are not available |
+
+Every push is also checked by [CI](.github/workflows/ci.yml): lint and tests, then the container
+platform is started, the models are downloaded and the smoke test runs.
 
 ## Roadmap
 

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install workspace
+        run: uv sync --locked --extra llm --all-packages
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Unit and integration tests (scripted model)
+        run: uv run pytest -q
+
+  platform:
+    name: Containers and local LLM
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate compose file
+        run: docker compose config --quiet
+
+      - name: Start platform (Ollama, Postgres + pgvector, Valkey)
+        run: docker compose up -d --wait ollama postgres valkey
+
+      - name: Download models
+        run: docker compose run --rm ollama-init
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install workspace
+        run: uv sync --locked --extra llm --all-packages
+
+      # Small local models are not fully deterministic; report but do not fail the build.
+      - name: Agent tests with the real model (informational)
+        continue-on-error: true
+        env:
+          RUN_LLM_TESTS: "1"
+        run: uv run pytest -q -m llm -rA
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+      - name: Stop platform
+        if: always()
+        run: docker compose down -v
