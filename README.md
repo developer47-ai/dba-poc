@@ -120,7 +120,7 @@ Built step by step; each step is one pull request and ends in something you can 
 ### Phase A — Foundation
 - [x] **Step 0 — Repository foundation**: license, git hygiene, secret scanning, roadmap
 - [x] **Step 1 — Local platform**: `docker-compose.yml` with Ollama, Postgres + pgvector, Valkey; automatic model pull; health checks; smoke test
-- [ ] **Step 2 — Shared library** `poc-common`: settings, OpenAI-compatible LLM factory, MCP client, event models, structured logging with correlation IDs
+- [x] **Step 2 — Shared library** `poc-common`: config, OpenAI-compatible LLM factory, MCP client, event models, structured logging with correlation IDs
 
 ### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat**
 - [ ] **Step 3 — Network simulator + `network-diagnostics-mcp`** with scenario customers
@@ -170,6 +170,14 @@ Built step by step; each step is one pull request and ends in something you can 
 | Gateway & identity (optional) | Traefik, Keycloak | MIT / Apache-2.0 |
 
 ## Contributing
+
+Python code uses [uv](https://docs.astral.sh/uv/) and Python 3.12:
+
+```bash
+uv sync --python 3.12 --extra llm --all-packages
+uv run pytest
+uv run ruff check .
+```
 
 1. `pip install pre-commit && pre-commit install` — blocks secrets and large files.
 2. One step = one branch = one pull request.
