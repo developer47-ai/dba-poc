@@ -16,7 +16,7 @@ concurrency:
 jobs:
   tests:
     name: Lint and unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -37,7 +37,7 @@ jobs:
 
   platform:
     name: Containers and local LLM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7

@@ -18,7 +18,7 @@ def run(app, **payload):
     return parse_sse(response.text)
 
 
-def test_stream_reports_tool_calls_then_the_answer(config):
+def test_stream_reports_tool_calls_then_streams_the_answer(config):
     llm = ScriptedChatModel(
         script=[
             tool_call_message("get_ppp_session"),
@@ -30,7 +30,8 @@ def test_stream_reports_tool_calls_then_the_answer(config):
         customer_id="C1002", message="no internet", session_id="s1",
     )
 
-    assert [e.type for e in events] == [
+    types = [e.type for e in events]
+    assert [t for t in types if t is not EventType.AGENT_MESSAGE_DELTA] == [
         EventType.STATUS_UPDATE,
         EventType.TOOL_CALL,
         EventType.TOOL_CALL,
@@ -40,10 +41,34 @@ def test_stream_reports_tool_calls_then_the_answer(config):
     started, completed = events[1].data, events[2].data
     assert started["status"] == "started" and started["tool"] == "get_ppp_session"
     assert completed["status"] == "completed" and completed["result"]["status"] == "down"
-    assert events[3].data["text"] == "Findings: PPP down."
+
+    deltas = [e for e in events if e.type is EventType.AGENT_MESSAGE_DELTA]
+    final = next(e for e in events if e.type is EventType.AGENT_MESSAGE)
+    assert len(deltas) > 1, "answer must arrive in several pieces, not as one batch"
+    assert types.index(EventType.AGENT_MESSAGE_DELTA) < types.index(EventType.AGENT_MESSAGE)
+    assert "".join(d.data["text"] for d in deltas) == "Findings: PPP down."
+    assert final.data == {
+        "message_id": deltas[0].data["message_id"], "text": "Findings: PPP down.", "final": True,
+    }
+    assert {d.data["message_id"] for d in deltas} == {final.data["message_id"]}
     assert {e.session_id for e in events} == {"s1"}
     assert {e.correlation_id for e in events} == {"corr-1"}
     assert {e.source for e in events} == {"inhome-agent"}
+
+
+def test_text_before_tool_calls_is_streamed_but_not_final(config):
+    narration = AIMessage(
+        "Let me check the line.",
+        tool_calls=[{"name": "get_ppp_session", "args": {}, "id": "n1"}],
+    )
+    llm = ScriptedChatModel(script=[narration, AIMessage("PPP is down.")])
+    events = run(create_app(config, llm), customer_id="C1002", message="no internet")
+
+    messages = [e.data for e in events if e.type is EventType.AGENT_MESSAGE]
+    assert [(m["text"], m["final"]) for m in messages] == [
+        ("Let me check the line.", False), ("PPP is down.", True),
+    ]
+    assert messages[0]["message_id"] != messages[1]["message_id"]
 
 
 def test_history_is_passed_to_the_model(config):
@@ -95,5 +120,7 @@ def test_real_model_diagnoses_the_stuck_modem(mcp_url):
     events = run(create_app(config), customer_id="C1002", message="Customer has no internet.")
     called = [e.data["tool"] for e in events if e.type is EventType.TOOL_CALL]
     assert "get_ppp_session" in called
-    answer = next(e for e in events if e.type is EventType.AGENT_MESSAGE).data["text"]
-    assert answer.strip()
+    final = [e for e in events if e.type is EventType.AGENT_MESSAGE and e.data["final"]]
+    assert final and final[-1].data["text"].strip()
+    deltas = [e for e in events if e.type is EventType.AGENT_MESSAGE_DELTA]
+    assert len(deltas) > 1, "the real model should stream the answer token by token"

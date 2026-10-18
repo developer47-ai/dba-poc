@@ -8,8 +8,9 @@ network-diagnostics MCP tools and answers the support expert.
   with the human-approval flow (Step 11).
 - **Customer scoped.** The code injects `customer_id` into every tool call and hides it from the
   model's tool schema.
-- **Streams progress** as SSE `Event`s: `status_update`, `tool_call` (started / completed),
-  `agent_message`, `error`, `done`.
+- **Streams in real time** as SSE `Event`s: `status_update`, `tool_call` (started / completed),
+  `agent_message_delta` (answer tokens as they are generated, Qwen3 `<think>` text filtered out),
+  `agent_message` (complete text, `final` true for the answer), `error`, `done`.
 
 ## API
 

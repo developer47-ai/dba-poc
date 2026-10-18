@@ -1,6 +1,6 @@
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from poc_common.llm import get_chat_model, get_embeddings, strip_thinking
+from poc_common.llm import ThinkingFilter, get_chat_model, get_embeddings, strip_thinking
 
 
 def test_chat_model_points_at_local_ollama(config):
@@ -25,3 +25,35 @@ def test_embeddings_use_plain_strings_for_ollama(config):
 def test_strip_thinking_removes_reasoning_block():
     assert strip_thinking("<think>\nlet me think\n</think>\npong") == "pong"
     assert strip_thinking("pong") == "pong"
+
+
+def test_chat_model_streams_by_default(config):
+    assert get_chat_model(config).streaming is True
+
+
+def _stream(chunks: list[str]) -> str:
+    stream_filter = ThinkingFilter()
+    return "".join(stream_filter.feed(c) for c in chunks) + stream_filter.flush()
+
+
+def test_thinking_filter_hides_reasoning_split_across_chunks():
+    chunks = ["<thi", "nk>\nsecret ", "plan</th", "ink>\n\n", "PPP is ", "down."]
+    assert _stream(chunks) == "PPP is down."
+
+
+def test_thinking_filter_passes_plain_text_through_immediately():
+    stream_filter = ThinkingFilter()
+    assert stream_filter.feed("The modem ") == "The modem "
+    assert stream_filter.feed("is offline.") == "is offline."
+
+
+def test_thinking_filter_holds_only_a_possible_partial_tag():
+    stream_filter = ThinkingFilter()
+    assert stream_filter.feed("Reboot <") == "Reboot "
+    assert stream_filter.feed("b>now</b>") == "<b>now</b>"
+    assert stream_filter.feed("x <th") == "x "
+    assert stream_filter.flush() == "<th"
+
+
+def test_thinking_filter_drops_unfinished_thinking():
+    assert _stream(["<think>never closed"]) == ""

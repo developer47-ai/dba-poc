@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ class EventType(StrEnum):
     AGENT_HANDOFF = "agent_handoff"
     TOOL_CALL = "tool_call"
     KNOWLEDGE_ARTICLE = "knowledge_article"
+    AGENT_MESSAGE_DELTA = "agent_message_delta"
     AGENT_MESSAGE = "agent_message"
     CONSENT_REQUEST = "consent_request"
     CONSENT_RESPONSE = "consent_response"
@@ -56,6 +57,20 @@ def parse_sse(stream: str) -> list[Event]:
 
 
 SSE_HEARTBEAT_COMMENT = ": heartbeat\n\n"
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AgentRequest(BaseModel):
+    """What the orchestrator sends to a specialist agent for one conversation turn."""
+
+    customer_id: str = Field(min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=4000)
+    session_id: str | None = None
+    history: list[ChatTurn] = Field(default_factory=list)
 
 
 class ConsentRequest(BaseModel):

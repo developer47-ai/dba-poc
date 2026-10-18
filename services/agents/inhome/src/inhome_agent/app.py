@@ -3,47 +3,43 @@
 import json
 import logging
 import os
+import uuid
 from collections.abc import AsyncIterator
-from typing import Literal
 
 from fastapi import FastAPI, Header
 from fastapi.responses import StreamingResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
-from pydantic import BaseModel, Field
 
 from inhome_agent.graph import build_graph
 from inhome_agent.tools import load_read_only_tools
 from poc_common.config import Config, get_config
-from poc_common.events import Event, EventType
-from poc_common.llm import get_chat_model, strip_thinking
+from poc_common.events import AgentRequest, ChatTurn, Event, EventType
+from poc_common.llm import ThinkingFilter, get_chat_model, strip_thinking
 from poc_common.logging import set_correlation_id, set_session_id, setup_logging
 
 logger = logging.getLogger(__name__)
 SOURCE = "inhome-agent"
 MAX_GRAPH_STEPS = 14
 
-
-class Turn(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
+DiagnoseRequest = AgentRequest
 
 
-class DiagnoseRequest(BaseModel):
-    customer_id: str
-    message: str
-    session_id: str | None = None
-    history: list[Turn] = Field(default_factory=list)
-
-
-def _to_message(turn: Turn):
+def _to_message(turn: ChatTurn):
     return HumanMessage(turn.content) if turn.role == "user" else AIMessage(turn.content)
 
 
 async def diagnose(
     request: DiagnoseRequest, config: Config, llm: BaseChatModel
 ) -> AsyncIterator[Event]:
+    """Run the agent and stream what happens, token by token.
+
+    `agent_message_delta` events carry answer text as the model generates it. When the model
+    message is complete an `agent_message` follows with the full text: `final=true` for the
+    answer, `final=false` for text the model wrote before calling tools.
+    """
+
     def event(type_: EventType, **data) -> Event:
         return Event(type=type_, source=SOURCE, session_id=request.session_id, data=data)
 
@@ -54,14 +50,40 @@ async def diagnose(
         yield event(EventType.STATUS_UPDATE, step="diagnosis_started", tools=len(tools))
 
         calls: dict[str, dict] = {}
-        async for update in graph.astream(
+        stream_filter: ThinkingFilter | None = None
+        stream_id: str | None = None
+        async for mode, payload in graph.astream(
             {"messages": messages},
             {"recursion_limit": MAX_GRAPH_STEPS},
-            stream_mode="updates",
+            stream_mode=["messages", "updates"],
         ):
-            for node_update in update.values():
+            if mode == "messages":
+                chunk, metadata = payload
+                if metadata.get("langgraph_node") != "agent" or not isinstance(
+                    chunk, AIMessageChunk
+                ):
+                    continue
+                if stream_filter is None:
+                    stream_filter, stream_id = ThinkingFilter(), chunk.id or uuid.uuid4().hex
+                text = stream_filter.feed(chunk.text)
+                if text:
+                    yield event(EventType.AGENT_MESSAGE_DELTA, message_id=stream_id, text=text)
+                continue
+
+            for node_update in payload.values():
                 for message in node_update["messages"]:
-                    if isinstance(message, AIMessage) and message.tool_calls:
+                    if isinstance(message, AIMessage):
+                        message_id = stream_id or message.id or uuid.uuid4().hex
+                        if stream_filter is not None:
+                            rest = stream_filter.flush()
+                            if rest:
+                                yield event(EventType.AGENT_MESSAGE_DELTA,
+                                            message_id=message_id, text=rest)
+                        stream_filter, stream_id = None, None
+                        text = strip_thinking(message.text)
+                        if text or not message.tool_calls:
+                            yield event(EventType.AGENT_MESSAGE, message_id=message_id,
+                                        text=text, final=not message.tool_calls)
                         for call in message.tool_calls:
                             calls[call["id"]] = call
                             yield event(
@@ -75,8 +97,6 @@ async def diagnose(
                             tool=call.get("name", message.name), status="completed",
                             result=_parse(message.content),
                         )
-                    elif isinstance(message, AIMessage):
-                        yield event(EventType.AGENT_MESSAGE, text=strip_thinking(message.text))
     except GraphRecursionError:
         yield event(EventType.ERROR, message="The agent did not reach an answer in time.")
     except Exception as exc:

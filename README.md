@@ -141,7 +141,7 @@ Built step by step; each step is one pull request and ends in something you can 
 ### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat**
 - [x] **Step 3 — Network simulator + `network-diagnostics-mcp`** with scenario customers
 - [x] **Step 4 — `inhome-agent`** (LangGraph agent with MCP tool calling, read-only, SSE stream)
-- [ ] **Step 5 — `orchestrator-agent`** (FastAPI, SSE streaming, single route)
+- [x] **Step 5 — `orchestrator-agent`** (FastAPI, sessions, routing, real-time SSE relay with token streaming)
 - [ ] **Step 6 — `chat-ui`** (session start, streaming answers)
 
 ### Phase C — Knowledge & process → **M2: SOP-guided troubleshooting with citations**

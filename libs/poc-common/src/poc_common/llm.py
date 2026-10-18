@@ -18,6 +18,7 @@ def get_chat_model(config: Config | None = None, **overrides: Any):
         "api_key": config.llm_api_key,
         "temperature": config.llm_temperature,
         "timeout": config.llm_timeout_s,
+        "streaming": True,
     }
     params.update(overrides)
     return ChatOpenAI(**params)
@@ -43,3 +44,52 @@ def strip_thinking(text: str) -> str:
     import re
 
     return re.sub(r"(?s)<think>.*?</think>", "", text).strip()
+
+
+class ThinkingFilter:
+    """Streaming version of `strip_thinking`: feed token chunks, get back only visible text.
+
+    Handles tags split across chunks (e.g. "<thi" + "nk>") and drops leading whitespace so a
+    streamed answer starts cleanly after a thinking block.
+    """
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._inside = False
+        self._started = False
+
+    def feed(self, chunk: str) -> str:
+        self._buffer += chunk
+        visible: list[str] = []
+        while self._buffer:
+            tag = self.CLOSE if self._inside else self.OPEN
+            index = self._buffer.find(tag)
+            if index >= 0:
+                if not self._inside:
+                    visible.append(self._buffer[:index])
+                self._buffer = self._buffer[index + len(tag):]
+                self._inside = not self._inside
+                continue
+            # Hold back a possible partial tag at the end until the next chunk decides it.
+            hold = next(
+                (k for k in range(len(tag) - 1, 0, -1) if self._buffer.endswith(tag[:k])), 0
+            )
+            ready = self._buffer[: len(self._buffer) - hold]
+            self._buffer = self._buffer[len(self._buffer) - hold:]
+            if not self._inside:
+                visible.append(ready)
+            break
+        return self._emit("".join(visible))
+
+    def flush(self) -> str:
+        rest = "" if self._inside else self._buffer
+        self._buffer = ""
+        return self._emit(rest)
+
+    def _emit(self, text: str) -> str:
+        if not self._started:
+            text = text.lstrip()
+            self._started = bool(text)
+        return text
