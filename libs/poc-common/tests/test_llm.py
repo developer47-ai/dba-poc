@@ -44,6 +44,14 @@ def test_answers_are_length_capped(config):
     assert get_chat_model(config).max_tokens == 800
 
 
+def test_qwen3_thinking_is_switched_off_at_the_api_level(config):
+    assert get_chat_model(config).reasoning_effort == "none"
+    payload = get_chat_model(config)._get_request_payload([("user", "hi")])
+    assert payload["reasoning_effort"] == "none"
+    assert get_chat_model(Config(llm_thinking=True)).reasoning_effort is None
+    assert get_chat_model(Config(chat_model="granite3.3:8b")).reasoning_effort is None
+
+
 def test_chat_model_streams_by_default(config):
     assert get_chat_model(config).streaming is True
 

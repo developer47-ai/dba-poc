@@ -21,6 +21,10 @@ def get_chat_model(config: Config | None = None, **overrides: Any):
         "max_tokens": config.llm_max_tokens,
         "streaming": True,
     }
+    if _thinking_off(config):
+        # Ollama maps this to think=false. Without it Qwen3 reasons in a separate `reasoning`
+        # channel that costs minutes per model call on a CPU, invisible to the user.
+        params["reasoning_effort"] = "none"
     params.update(overrides)
     return ChatOpenAI(**params)
 
@@ -50,14 +54,19 @@ def strip_thinking(text: str) -> str:
 NO_THINK_SWITCH = "/no_think"
 
 
+def _thinking_off(config: Config) -> bool:
+    return not config.llm_thinking and config.chat_model.lower().startswith("qwen3")
+
+
 def apply_thinking_mode(system_prompt: str, config: Config | None = None) -> str:
     """Append Qwen3's `/no_think` soft switch unless thinking is enabled.
 
     Qwen3 otherwise writes a long hidden reasoning block before every reply and tool call, which
-    on a CPU costs minutes per turn while the user sees nothing.
+    on a CPU costs minutes per turn while the user sees nothing. `get_chat_model` also turns
+    thinking off at the API level; the prompt switch covers servers that ignore that setting.
     """
     config = config or get_config()
-    if config.llm_thinking or not config.chat_model.lower().startswith("qwen3"):
+    if not _thinking_off(config):
         return system_prompt
     return f"{system_prompt.rstrip()}\n{NO_THINK_SWITCH}"
 
