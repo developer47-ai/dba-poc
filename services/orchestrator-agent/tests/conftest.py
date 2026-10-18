@@ -22,11 +22,15 @@ SCENARIO_DIR = Path(__file__).resolve().parents[3] / "data" / "scenarios"
 
 
 @pytest.fixture(scope="module")
-def mcp_url():
-    network = Network.from_directory(SCENARIO_DIR)
-    with run_app_in_thread(create_simulator_app(network)) as simulator_url:
-        with run_app_in_thread(create_server(simulator_url).streamable_http_app()) as base:
-            yield f"{base}/mcp"
+def simulator_url():
+    with run_app_in_thread(create_simulator_app(Network.from_directory(SCENARIO_DIR))) as url:
+        yield url
+
+
+@pytest.fixture(scope="module")
+def mcp_url(simulator_url):
+    with run_app_in_thread(create_server(simulator_url).streamable_http_app()) as base:
+        yield f"{base}/mcp"
 
 
 @pytest.fixture

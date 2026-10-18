@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from network_diagnostics_mcp import create_server
@@ -71,6 +72,12 @@ async def test_wifi_reset_flow(mcp_url):
 async def test_inapplicable_tool_is_a_readable_tool_error(mcp_url):
     with pytest.raises(McpToolError, match="no ONT"):
         await call_tool(mcp_url, "get_ont_status", {"customer_id": "C1004"})
+
+
+async def test_health_route(mcp_url):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(mcp_url.removesuffix("/mcp") + "/health")
+    assert response.json() == {"status": "ok", "service": "network-diagnostics-mcp"}
 
 
 async def test_unknown_customer_is_a_readable_tool_error(mcp_url):

@@ -179,3 +179,20 @@ def test_health(fake_agent, orchestrator):
     assert orchestrator(agent_url).get("/health").json() == {
         "status": "ok", "service": "orchestrator", "agents": ["inhome-agent"],
     }
+
+
+def test_demo_endpoints_list_and_reset_scenario_customers(simulator_url):
+    app = create_app(Config(network_simulator_url=simulator_url),
+                     registry=AgentRegistry({"inhome-agent": "http://unused"}))
+    with TestClient(app) as client:
+        customers = client.get("/v1/demo/customers").json()
+        assert [c["customer_id"] for c in customers][:2] == ["C1001", "C1002"]
+        assert client.post("/v1/demo/customers/C1002/reset").json()["status"] == "reset"
+        assert client.post("/v1/demo/customers/C9999/reset").status_code == 404
+
+
+def test_demo_endpoints_report_a_missing_simulator():
+    app = create_app(Config(network_simulator_url="http://127.0.0.1:9"),
+                     registry=AgentRegistry({"inhome-agent": "http://unused"}))
+    with TestClient(app) as client:
+        assert client.get("/v1/demo/customers").status_code == 503

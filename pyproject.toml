@@ -5,7 +5,7 @@ description = "Local multi-agent connectivity troubleshooting POC (workspace roo
 requires-python = ">=3.12"
 dependencies = [
   "poc-common", "network-simulator", "network-diagnostics-mcp", "inhome-agent",
-  "orchestrator-agent",
+  "orchestrator-agent", "chat-ui",
 ]
 
 [tool.uv]
@@ -14,7 +14,7 @@ package = false
 [tool.uv.workspace]
 members = [
   "libs/*", "services/network-simulator", "services/mcp/*", "services/agents/*",
-  "services/orchestrator-agent",
+  "services/orchestrator-agent", "services/chat-ui",
 ]
 
 [tool.uv.sources]
@@ -23,6 +23,7 @@ network-simulator = { workspace = true }
 network-diagnostics-mcp = { workspace = true }
 inhome-agent = { workspace = true }
 orchestrator-agent = { workspace = true }
+chat-ui = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -47,4 +48,5 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = [
   "poc_common", "network_simulator", "network_diagnostics_mcp", "inhome_agent", "orchestrator",
+  "chat_ui",
 ]

@@ -3,7 +3,13 @@ import asyncio
 import httpx
 
 from poc_common.events import Event, EventType
-from poc_common.sse import iter_sse_events, sse_with_heartbeats
+from poc_common.sse import iter_sse_events, parse_sse_lines, sse_with_heartbeats
+
+
+def test_parse_sse_lines_yields_each_complete_frame():
+    first, second = Event(type=EventType.STATUS_UPDATE), Event(type=EventType.DONE)
+    lines = (first.to_sse() + ": heartbeat\n\n" + second.to_sse()).split("\n")
+    assert [e.event_id for e in parse_sse_lines(lines)] == [first.event_id, second.event_id]
 
 
 async def test_iter_sse_events_reads_frames_incrementally():

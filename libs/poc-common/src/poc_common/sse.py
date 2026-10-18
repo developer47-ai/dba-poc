@@ -1,11 +1,25 @@
 """Server-Sent Events helpers: read an event stream incrementally, and keep a stream alive."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable, Iterator
 
 import httpx
 
 from poc_common.events import SSE_HEARTBEAT_COMMENT, Event, EventType
+
+
+def parse_sse_lines(lines: Iterable[str]) -> Iterator[Event]:
+    """Synchronous variant for line iterators (e.g. `httpx.Response.iter_lines()`)."""
+    data_lines: list[str] = []
+    for line in lines:
+        if line == "":
+            if data_lines:
+                yield Event.model_validate_json("\n".join(data_lines))
+                data_lines = []
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if data_lines:
+        yield Event.model_validate_json("\n".join(data_lines))
 
 
 async def iter_sse_events(response: httpx.Response) -> AsyncIterator[Event]:

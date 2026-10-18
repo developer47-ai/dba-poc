@@ -1,9 +1,113 @@
-# DBA POC - local platform (Step 1): LLM runtime, database, cache.
-# Usage:  docker compose up -d        then        ./scripts/smoke-test.ps1  (or .sh)
+# DBA POC - the whole product on one machine.
+#   docker compose up -d            # first run builds images and downloads ~3.5 GB of models
+#   open http://localhost:8501      # expert console
+#   ./scripts/smoke-test.ps1 (.sh)  # platform checks;  python scripts/e2e_check.py  # full chat
 
 name: dba-poc
 
+x-service-env: &service-env
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LLM_BASE_URL: http://ollama:11434/v1
+  OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:4b}
+  OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
+  NETWORK_SIMULATOR_URL: http://network-simulator:8300
+  DIAGNOSTICS_MCP_URL: http://network-diagnostics-mcp:8101/mcp
+  INHOME_AGENT_URL: http://inhome-agent:8201
+  ORCHESTRATOR_URL: http://orchestrator:8000
+
+x-health: &health
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 15s
+
 services:
+  # ---- Application ---------------------------------------------------------------------------
+  chat-ui:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: chat-ui, MODULE: chat_ui }
+    image: dba-poc/chat-ui:local
+    container_name: dba-chat-ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CHAT_UI_PORT:-8501}:8501"
+    environment:
+      <<: *service-env
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
+    depends_on:
+      orchestrator: { condition: service_healthy }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8501/_stcore/health', timeout=4)"]
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: orchestrator-agent, MODULE: orchestrator }
+    image: dba-poc/orchestrator:local
+    container_name: dba-orchestrator
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ORCHESTRATOR_PORT:-8000}:8000"
+    environment: *service-env
+    depends_on:
+      inhome-agent: { condition: service_healthy }
+      network-simulator: { condition: service_healthy }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=4)"]
+
+  inhome-agent:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: inhome-agent, MODULE: inhome_agent }
+    image: dba-poc/inhome-agent:local
+    container_name: dba-inhome-agent
+    restart: unless-stopped
+    environment: *service-env
+    depends_on:
+      network-diagnostics-mcp: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+      ollama-init: { condition: service_completed_successfully }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8201/health', timeout=4)"]
+
+  network-diagnostics-mcp:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: network-diagnostics-mcp, MODULE: network_diagnostics_mcp }
+    image: dba-poc/network-diagnostics-mcp:local
+    container_name: dba-network-diagnostics-mcp
+    restart: unless-stopped
+    environment: *service-env
+    depends_on:
+      network-simulator: { condition: service_healthy }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8101/health', timeout=4)"]
+
+  network-simulator:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: network-simulator, MODULE: network_simulator }
+    image: dba-poc/network-simulator:local
+    container_name: dba-network-simulator
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SIMULATOR_SCENARIO_DIR: /app/data/scenarios
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8300/health', timeout=4)"]
+
+  # ---- Platform ------------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:0.40.6
     container_name: dba-ollama

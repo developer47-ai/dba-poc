@@ -67,6 +67,25 @@ def create_app(
     def get_session(session_id: str) -> dict:
         return app.state.sessions.get(session_id).summary()
 
+    # Demo helpers for the chat UI: in a real deployment the CRM supplies the customer.
+    async def simulator(method: str, path: str, **kwargs):
+        url = f"{config.network_simulator_url.rstrip('/')}{path}"
+        try:
+            response = await app.state.http.request(method, url, **kwargs)
+        except httpx.HTTPError as exc:
+            raise HTTPException(503, f"network simulator unavailable: {exc}") from exc
+        if response.status_code >= 400:
+            raise HTTPException(response.status_code, response.json().get("detail", "error"))
+        return response.json()
+
+    @app.get("/v1/demo/customers")
+    async def demo_customers() -> list[dict]:
+        return await simulator("GET", "/customers")
+
+    @app.post("/v1/demo/customers/{customer_id}/reset")
+    async def demo_reset_customer(customer_id: str) -> dict:
+        return await simulator("POST", "/admin/reset", params={"customer_id": customer_id})
+
     @app.post("/v1/sessions/{session_id}/messages")
     async def post_message(
         session_id: str,

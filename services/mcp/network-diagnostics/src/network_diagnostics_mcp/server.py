@@ -11,6 +11,8 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from poc_common.config import get_config
 from poc_common.logging import setup_logging
@@ -52,6 +54,10 @@ def create_server(
     backend = Backend(backend_url or get_config().network_simulator_url, client)
     # Binding to 0.0.0.0 (containers) also disables FastMCP's localhost-only Host header check.
     server = FastMCP("network-diagnostics", host=host, port=port)
+
+    @server.custom_route("/health", methods=["GET"])
+    async def health(_: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "service": "network-diagnostics-mcp"})
 
     @server.tool(annotations=READ_ONLY)
     async def get_ppp_session(customer_id: str) -> dict:

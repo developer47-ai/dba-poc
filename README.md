@@ -95,14 +95,19 @@ dba-poc/
 
 ## Quick start
 
-The platform layer (LLM, database, cache) is available now; the chat UI arrives in milestone **M1**.
-
 ```bash
 git clone https://github.com/developer47-ai/dba-poc.git
 cd dba-poc
-docker compose up -d            # first start downloads ~3.5 GB of models (a few minutes)
-./scripts/smoke-test.sh         # Windows: .\scripts\smoke-test.ps1
+docker compose up -d            # first run builds the images and downloads ~3.5 GB of models
 ```
+
+Open **http://localhost:8501**, pick scenario customer **C1002** in the sidebar, click
+**Start new session** and type *"The customer has no internet"*. The In-Home agent runs its
+diagnostic tools (visible live in the activity panel) and streams its answer word by word.
+**Reset customer's network** restores the scenario between demos.
+
+Checks: `./scripts/smoke-test.sh` (Windows: `.\scripts\smoke-test.ps1`) tests the platform, and
+`python scripts/e2e_check.py` runs a full troubleshooting conversation through the API.
 
 All settings have working defaults. To override them (for example `OLLAMA_CHAT_MODEL=qwen3:8b`),
 create a `.env` file next to `docker-compose.yml`; see the variables used in the compose file.
@@ -110,9 +115,13 @@ NVIDIA GPU users: `docker compose -f docker-compose.yml -f docker-compose.gpu.ym
 
 | Service | Port (localhost only) | Purpose |
 |---|---|---|
+| Chat UI (Streamlit) | 8501 | Expert console |
+| Orchestrator | 8000 | Sessions and streamed turns (`/docs` for the API) |
 | Ollama | 11434 | Local LLM, OpenAI-compatible API at `/v1` |
 | PostgreSQL + pgvector | 5432 | Data and vector search (user `dba`, db `dba`) |
 | Valkey | 6379 | Cache and rate limits |
+
+In-Home agent, diagnostics MCP server and network simulator run on the internal Docker network only.
 
 **Requirements:** a Docker-compatible runtime (Rancher Desktop, Docker Engine or Podman),
 16 GB RAM minimum (32 GB recommended), ~25 GB free disk. A GPU is optional.
@@ -121,13 +130,13 @@ NVIDIA GPU users: `docker compose -f docker-compose.yml -f docker-compose.gpu.ym
 
 | Where | How | Best for |
 |---|---|---|
-| **GitHub Codespaces** (no install) | Click the *Open in GitHub Codespaces* badge (4 cores / 16 GB), then `docker compose up -d` and `bash scripts/smoke-test.sh` in its terminal | Trying it from any browser |
+| **GitHub Codespaces** (no install) | Click the *Open in GitHub Codespaces* badge (4 cores / 16 GB), run `docker compose up -d` in its terminal, then open the forwarded port 8501 | Trying it from any browser |
 | **Your machine with Docker** | The commands above | Full speed, recording demos |
 | **Python only, no Docker** | `uv sync --python 3.12 --extra llm --all-packages` then `uv run pytest` | Developing services; tests use a scripted model |
-| **Python + native Ollama** | Install [Ollama](https://ollama.com/download), `ollama pull qwen3:4b` and `ollama pull bge-m3`, then `RUN_LLM_TESTS=1 uv run pytest -m llm` | Agent work against the real local model when containers are not available |
 
-Every push is also checked by [CI](.github/workflows/ci.yml): lint and tests, then the container
-platform is started, the models are downloaded and the smoke test runs.
+Every push is also checked by [CI](.github/workflows/ci.yml): lint and tests, then the whole
+product is built and started with the real local model, and an end-to-end troubleshooting
+conversation must stream a correct answer.
 
 ## Roadmap
 
@@ -138,11 +147,11 @@ Built step by step; each step is one pull request and ends in something you can 
 - [x] **Step 1 — Local platform**: `docker-compose.yml` with Ollama, Postgres + pgvector, Valkey; automatic model pull; health checks; smoke test
 - [x] **Step 2 — Shared library** `poc-common`: config, OpenAI-compatible LLM factory, MCP client, event models, structured logging with correlation IDs
 
-### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat**
+### Phase B — Walking skeleton → **M1: first end-to-end troubleshooting in chat** ✅
 - [x] **Step 3 — Network simulator + `network-diagnostics-mcp`** with scenario customers
 - [x] **Step 4 — `inhome-agent`** (LangGraph agent with MCP tool calling, read-only, SSE stream)
 - [x] **Step 5 — `orchestrator-agent`** (FastAPI, sessions, routing, real-time SSE relay with token streaming)
-- [ ] **Step 6 — `chat-ui`** (session start, streaming answers)
+- [x] **Step 6 — `chat-ui`** (Streamlit console, live tool activity, token streaming) + all services in `docker compose` + end-to-end CI
 
 ### Phase C — Knowledge & process → **M2: SOP-guided troubleshooting with citations**
 - [ ] **Step 7 — SOP library + `kb-ingestion` + `knowledge-mcp`** (hybrid search, SOP step graph)
