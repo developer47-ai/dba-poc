@@ -163,6 +163,8 @@ Built step by step; each step is one pull request and ends in something you can 
 
 ### Phase C — Knowledge & process → **M2: SOP-guided troubleshooting with citations**
 - [ ] **Step 7 — SOP library + `kb-ingestion` + `knowledge-mcp`** (hybrid search, SOP step graph)
+  - [x] 7a — SOP format, [`knowledge/`](knowledge) library (8 procedures, 2 references), `sop-kit` parser, validator and chunker; validated in CI
+  - [ ] 7b — Postgres/pgvector store, embedding ingestion, hybrid search, `knowledge-mcp` tools
 - [ ] **Step 8 — SOP-guided agents** (follow steps, cite `sop_id/step_id`, no-SOP fallback)
 
 ### Phase D — Full multi-agent platform → **M3: all scenarios**

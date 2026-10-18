@@ -32,6 +32,9 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Validate the SOP knowledge library
+        run: uv run python -m sop_kit knowledge
+
       - name: Unit and integration tests (scripted model)
         run: uv run pytest -q
 
