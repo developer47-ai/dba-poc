@@ -131,7 +131,7 @@ def write_summary(metrics: dict, passed: bool) -> None:
     with open(path, "a", encoding="utf-8") as summary:
         summary.write(
             f"### End-to-end conversation {'✅' if passed else '❌'}\n\n"
-            f"Customer `{CUSTOMER}` · model `{os.getenv('OLLAMA_CHAT_MODEL', 'qwen3:4b')}` "
+            f"Customer `{CUSTOMER}` · model `{os.getenv('OLLAMA_CHAT_MODEL', 'qwen3:4b-instruct-2507-q4_K_M')}` "
             f"on a CPU-only runner\n\n"
             "| First event | First tool call | First answer token | Whole turn | Tools | Tokens |\n"
             "|---|---|---|---|---|---|\n"

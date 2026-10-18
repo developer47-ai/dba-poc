@@ -8,7 +8,7 @@ name: dba-poc
 x-service-env: &service-env
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   LLM_BASE_URL: http://ollama:11434/v1
-  OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:4b}
+  OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
   OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
   LLM_THINKING: ${LLM_THINKING:-false}
   NETWORK_SIMULATOR_URL: http://network-simulator:8300
@@ -141,7 +141,7 @@ services:
     restart: "no"
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:4b}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
     entrypoint: ["/bin/sh", "-c"]
     command:

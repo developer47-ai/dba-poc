@@ -3,7 +3,7 @@ from poc_common.config import Config
 
 def test_defaults_target_local_ollama(config):
     assert config.llm_base_url == "http://localhost:11434/v1"
-    assert config.chat_model == "qwen3:4b"
+    assert config.chat_model == "qwen3:4b-instruct-2507-q4_K_M"
     assert config.embed_model == "bge-m3"
     assert config.llm_temperature == 0.0
 

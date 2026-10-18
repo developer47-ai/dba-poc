@@ -13,7 +13,7 @@ from poc_common.llm import (
 def test_chat_model_points_at_local_ollama(config):
     model = get_chat_model(config)
     assert isinstance(model, ChatOpenAI)
-    assert model.model_name == "qwen3:4b"
+    assert model.model_name == "qwen3:4b-instruct-2507-q4_K_M"
     assert str(model.openai_api_base).startswith("http://localhost:11434/v1")
     assert model.temperature == 0.0
 
@@ -34,9 +34,23 @@ def test_strip_thinking_removes_reasoning_block():
     assert strip_thinking("pong") == "pong"
 
 
-def test_no_think_switch_only_for_qwen3_with_thinking_off(config):
-    assert apply_thinking_mode("Be brief.", config) == "Be brief.\n/no_think"
-    assert apply_thinking_mode("Be brief.", Config(llm_thinking=True)) == "Be brief."
+def test_strip_thinking_handles_a_missing_opening_tag():
+    assert strip_thinking("Okay, let me check.\n</think>\n\nPPP is down.") == "PPP is down."
+
+
+HYBRID = Config(chat_model="qwen3:8b")
+
+
+def test_default_model_is_the_non_thinking_instruct_variant(config):
+    assert "instruct" in config.chat_model
+    assert apply_thinking_mode("Be brief.", config) == "Be brief."
+    assert get_chat_model(config).reasoning_effort is None
+
+
+def test_no_think_switch_only_for_hybrid_qwen3_with_thinking_off():
+    assert apply_thinking_mode("Be brief.", HYBRID) == "Be brief.\n/no_think"
+    thinking_on = Config(chat_model="qwen3:8b", llm_thinking=True)
+    assert apply_thinking_mode("Be brief.", thinking_on) == "Be brief."
     assert apply_thinking_mode("Be brief.", Config(chat_model="granite3.3:8b")) == "Be brief."
 
 
@@ -44,11 +58,12 @@ def test_answers_are_length_capped(config):
     assert get_chat_model(config).max_tokens == 800
 
 
-def test_qwen3_thinking_is_switched_off_at_the_api_level(config):
-    assert get_chat_model(config).reasoning_effort == "none"
-    payload = get_chat_model(config)._get_request_payload([("user", "hi")])
+def test_hybrid_qwen3_thinking_is_switched_off_at_the_api_level():
+    assert get_chat_model(HYBRID).reasoning_effort == "none"
+    payload = get_chat_model(HYBRID)._get_request_payload([("user", "hi")])
     assert payload["reasoning_effort"] == "none"
-    assert get_chat_model(Config(llm_thinking=True)).reasoning_effort is None
+    thinking_on = Config(chat_model="qwen3:8b", llm_thinking=True)
+    assert get_chat_model(thinking_on).reasoning_effort is None
     assert get_chat_model(Config(chat_model="granite3.3:8b")).reasoning_effort is None
 
 

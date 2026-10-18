@@ -18,10 +18,17 @@ def run(app, **payload):
     return parse_sse(response.text)
 
 
-def test_qwen3_thinking_is_switched_off_by_default(config):
+def test_hybrid_qwen3_gets_the_no_think_switch(mcp_url):
+    config = Config(diagnostics_mcp_url=mcp_url, chat_model="qwen3:8b")
     llm = ScriptedChatModel(script=[AIMessage("ok")])
     run(create_app(config, llm), customer_id="C1002", message="hi")
     assert llm.received[0][0].content.endswith("\n/no_think")
+
+
+def test_default_instruct_model_gets_the_plain_prompt(config):
+    llm = ScriptedChatModel(script=[AIMessage("ok")])
+    run(create_app(config, llm), customer_id="C1002", message="hi")
+    assert "/no_think" not in llm.received[0][0].content
 
 
 def test_thinking_can_be_enabled_and_reports_progress(mcp_url):

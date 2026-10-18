@@ -11,9 +11,10 @@ network-diagnostics MCP tools and answers the support expert.
 - **Streams in real time** as SSE `Event`s: `status_update`, `tool_call` (started / completed),
   `agent_message_delta` (answer tokens as they are generated, Qwen3 `<think>` text filtered out),
   `agent_message` (complete text, `final` true for the answer), `error`, `done`.
-- **Fast on CPU.** Qwen3's hidden "thinking" is switched off with its `/no_think` switch
-  (`LLM_THINKING=false`, the default); `status_update` `step=reasoning` events show each moment
-  the model is working so the UI never looks frozen.
+- **Fast on CPU.** The default model is the non-thinking Qwen3-4B Instruct-2507. For hybrid Qwen3
+  models, thinking is switched off (`reasoning_effort=none` plus the `/no_think` switch) unless
+  `LLM_THINKING=true`; `status_update` `step=reasoning` events show each moment the model is
+  working so the UI never looks frozen.
 
 ## API
 

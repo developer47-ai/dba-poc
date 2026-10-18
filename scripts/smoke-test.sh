@@ -10,7 +10,7 @@ env_value() { # name default
 }
 
 OLLAMA="http://127.0.0.1:$(env_value OLLAMA_PORT 11434)"
-CHAT=$(env_value OLLAMA_CHAT_MODEL qwen3:4b)
+CHAT=$(env_value OLLAMA_CHAT_MODEL qwen3:4b-instruct-2507-q4_K_M)
 EMBED=$(env_value OLLAMA_EMBED_MODEL bge-m3)
 PG_USER=$(env_value POSTGRES_USER dba)
 PG_DB=$(env_value POSTGRES_DB dba)

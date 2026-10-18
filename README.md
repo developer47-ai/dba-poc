@@ -113,10 +113,13 @@ All settings have working defaults. To override them (for example `OLLAMA_CHAT_M
 create a `.env` file next to `docker-compose.yml`; see the variables used in the compose file.
 NVIDIA GPU users: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`.
 
-**Speed on CPU.** Qwen3's hidden reasoning is off by default (`LLM_THINKING=false`), Ollama uses
-one request slot and an 8k context (`OLLAMA_NUM_PARALLEL`, `OLLAMA_CONTEXT_LENGTH`), and the chat
-model is loaded into memory during startup. Every CI run publishes the measured time to first tool
-call, first answer token and whole turn on its run page.
+**Speed on CPU.** The default chat model is **Qwen3-4B Instruct-2507**
+(`qwen3:4b-instruct-2507-q4_K_M`), which answers directly. The plain `qwen3:4b` tag is the
+*thinking-only* variant: it writes a long hidden reasoning before every step and is several times
+slower on a CPU. For hybrid models such as `qwen3:8b`, thinking is switched off unless
+`LLM_THINKING=true`. Ollama uses one request slot and an 8k context (`OLLAMA_NUM_PARALLEL`,
+`OLLAMA_CONTEXT_LENGTH`), and the chat model is loaded into memory during startup. Every CI run
+publishes the measured time to first tool call, first answer token and whole turn on its run page.
 
 | Service | Port (localhost only) | Purpose |
 |---|---|---|

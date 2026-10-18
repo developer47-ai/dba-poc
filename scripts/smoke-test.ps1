@@ -12,7 +12,7 @@ function Env-Value($name, $default) {
 }
 
 $ollama = "http://127.0.0.1:" + (Env-Value "OLLAMA_PORT" "11434")
-$chat   = Env-Value "OLLAMA_CHAT_MODEL" "qwen3:4b"
+$chat   = Env-Value "OLLAMA_CHAT_MODEL" "qwen3:4b-instruct-2507-q4_K_M"
 $embed  = Env-Value "OLLAMA_EMBED_MODEL" "bge-m3"
 $pgUser = Env-Value "POSTGRES_USER" "dba"
 $pgDb   = Env-Value "POSTGRES_DB" "dba"

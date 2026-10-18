@@ -16,8 +16,11 @@ class Config(BaseSettings):
     # LLM: any OpenAI-compatible endpoint; the POC uses Ollama.
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = "ollama"
+    # Qwen3-4B Instruct-2507: answers directly (no hidden reasoning), good tool calling, 2.3 GB.
+    # Note: the plain "qwen3:4b" tag is the thinking-only 2507 variant, which is slow on CPU.
     chat_model: str = Field(
-        default="qwen3:4b", validation_alias=AliasChoices("OLLAMA_CHAT_MODEL", "CHAT_MODEL")
+        default="qwen3:4b-instruct-2507-q4_K_M",
+        validation_alias=AliasChoices("OLLAMA_CHAT_MODEL", "CHAT_MODEL"),
     )
     embed_model: str = Field(
         default="bge-m3", validation_alias=AliasChoices("OLLAMA_EMBED_MODEL", "EMBED_MODEL")

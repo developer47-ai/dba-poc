@@ -45,17 +45,27 @@ def get_embeddings(config: Config | None = None, **overrides: Any):
 
 
 def strip_thinking(text: str) -> str:
-    """Remove Qwen3 <think>...</think> blocks from a reply."""
+    """Remove Qwen3 <think>...</think> blocks from a reply.
+
+    Thinking-only models may omit the opening tag (the server adds it to the prompt), so text
+    before a lone leading `</think>` is reasoning too.
+    """
     import re
 
-    return re.sub(r"(?s)<think>.*?</think>", "", text).strip()
+    text = re.sub(r"(?s)<think>.*?</think>", "", text)
+    head, closing, tail = text.partition("</think>")
+    if closing and "<think>" not in head:
+        text = tail
+    return text.strip()
 
 
 NO_THINK_SWITCH = "/no_think"
 
 
 def _thinking_off(config: Config) -> bool:
-    return not config.llm_thinking and config.chat_model.lower().startswith("qwen3")
+    """Whether to switch thinking off: only for Qwen3 models that can think (hybrid ones)."""
+    model = config.chat_model.lower()
+    return not config.llm_thinking and model.startswith("qwen3") and "instruct" not in model
 
 
 def apply_thinking_mode(system_prompt: str, config: Config | None = None) -> str:
