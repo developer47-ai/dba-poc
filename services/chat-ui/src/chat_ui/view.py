@@ -62,6 +62,10 @@ def apply_event(view: TurnView, event: Event) -> str | None:
         case EventType.STATUS_UPDATE if data.get("step") == "diagnosis_started":
             view.status_label = f"{event.source} is diagnosing…"
             line = f"🩺 **{event.source}** started ({data.get('tools', '?')} tools available)"
+        case EventType.STATUS_UPDATE if data.get("step") == "reasoning":
+            view.status_label = f"🧠 {event.source} is reasoning (step {data.get('round', 1)})…"
+        case EventType.STATUS_UPDATE if data.get("step") == "thinking":
+            view.status_label = f"🧠 Thinking… ({data.get('tokens', 0)} tokens)"
         case EventType.AGENT_HANDOFF:
             line = f"🔀 Hand-over: {data.get('from_agent')} → **{data.get('to_agent')}**"
         case EventType.TOOL_CALL if data.get("status") == "started":

@@ -1,6 +1,13 @@
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from poc_common.llm import ThinkingFilter, get_chat_model, get_embeddings, strip_thinking
+from poc_common.config import Config
+from poc_common.llm import (
+    ThinkingFilter,
+    apply_thinking_mode,
+    get_chat_model,
+    get_embeddings,
+    strip_thinking,
+)
 
 
 def test_chat_model_points_at_local_ollama(config):
@@ -25,6 +32,16 @@ def test_embeddings_use_plain_strings_for_ollama(config):
 def test_strip_thinking_removes_reasoning_block():
     assert strip_thinking("<think>\nlet me think\n</think>\npong") == "pong"
     assert strip_thinking("pong") == "pong"
+
+
+def test_no_think_switch_only_for_qwen3_with_thinking_off(config):
+    assert apply_thinking_mode("Be brief.", config) == "Be brief.\n/no_think"
+    assert apply_thinking_mode("Be brief.", Config(llm_thinking=True)) == "Be brief."
+    assert apply_thinking_mode("Be brief.", Config(chat_model="granite3.3:8b")) == "Be brief."
+
+
+def test_answers_are_length_capped(config):
+    assert get_chat_model(config).max_tokens == 800
 
 
 def test_chat_model_streams_by_default(config):

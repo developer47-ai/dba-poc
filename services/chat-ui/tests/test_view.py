@@ -60,6 +60,15 @@ def test_narration_before_tool_calls_moves_to_the_log():
     assert view.text == "All good."
 
 
+def test_reasoning_and_thinking_progress_update_the_label_only():
+    view, lines = play(
+        ev(EventType.STATUS_UPDATE, step="reasoning", round=2),
+    )
+    assert view.status_label == "🧠 inhome-agent is reasoning (step 2)…" and lines == []
+    apply_event(view, ev(EventType.STATUS_UPDATE, step="thinking", tokens=50))
+    assert view.status_label == "🧠 Thinking… (50 tokens)" and view.log == []
+
+
 def test_failed_tool_and_error_are_visible():
     view, lines = play(
         ev(EventType.TOOL_CALL, tool="get_ont_status", arguments={}, status="started"),

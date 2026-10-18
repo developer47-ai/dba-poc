@@ -18,6 +18,25 @@ def run(app, **payload):
     return parse_sse(response.text)
 
 
+def test_qwen3_thinking_is_switched_off_by_default(config):
+    llm = ScriptedChatModel(script=[AIMessage("ok")])
+    run(create_app(config, llm), customer_id="C1002", message="hi")
+    assert llm.received[0][0].content.endswith("\n/no_think")
+
+
+def test_thinking_can_be_enabled_and_reports_progress(mcp_url):
+    config = Config(diagnostics_mcp_url=mcp_url, llm_thinking=True)
+    hidden = " ".join(["step"] * 60)
+    llm = ScriptedChatModel(script=[AIMessage(f"<think>{hidden}</think>PPP is down.")])
+    events = run(create_app(config, llm), customer_id="C1002", message="hi")
+
+    assert not llm.received[0][0].content.endswith("/no_think")
+    progress = [e.data["tokens"] for e in events if e.data.get("step") == "thinking"]
+    assert progress == [25, 50]
+    deltas = "".join(e.data["text"] for e in events if e.type is EventType.AGENT_MESSAGE_DELTA)
+    assert deltas == "PPP is down."
+
+
 def test_stream_reports_tool_calls_then_streams_the_answer(config):
     llm = ScriptedChatModel(
         script=[
@@ -32,13 +51,16 @@ def test_stream_reports_tool_calls_then_streams_the_answer(config):
 
     types = [e.type for e in events]
     assert [t for t in types if t is not EventType.AGENT_MESSAGE_DELTA] == [
-        EventType.STATUS_UPDATE,
+        EventType.STATUS_UPDATE,   # diagnosis started
+        EventType.STATUS_UPDATE,   # reasoning, round 1
         EventType.TOOL_CALL,
         EventType.TOOL_CALL,
+        EventType.STATUS_UPDATE,   # reasoning, round 2 (on the tool results)
         EventType.AGENT_MESSAGE,
         EventType.DONE,
     ]
-    started, completed = events[1].data, events[2].data
+    assert [e.data.get("round") for e in events if e.data.get("step") == "reasoning"] == [1, 2]
+    started, completed = events[2].data, events[3].data
     assert started["status"] == "started" and started["tool"] == "get_ppp_session"
     assert completed["status"] == "completed" and completed["result"]["status"] == "down"
 

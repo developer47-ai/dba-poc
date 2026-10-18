@@ -13,15 +13,17 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langgraph.errors import GraphRecursionError
 
 from inhome_agent.graph import build_graph
+from inhome_agent.prompts import SYSTEM_PROMPT
 from inhome_agent.tools import load_read_only_tools
 from poc_common.config import Config, get_config
 from poc_common.events import AgentRequest, ChatTurn, Event, EventType
-from poc_common.llm import ThinkingFilter, get_chat_model, strip_thinking
+from poc_common.llm import ThinkingFilter, apply_thinking_mode, get_chat_model, strip_thinking
 from poc_common.logging import set_correlation_id, set_session_id, setup_logging
 
 logger = logging.getLogger(__name__)
 SOURCE = "inhome-agent"
 MAX_GRAPH_STEPS = 14
+THINKING_REPORT_EVERY = 25
 
 DiagnoseRequest = AgentRequest
 
@@ -38,20 +40,29 @@ async def diagnose(
     `agent_message_delta` events carry answer text as the model generates it. When the model
     message is complete an `agent_message` follows with the full text: `final=true` for the
     answer, `final=false` for text the model wrote before calling tools.
+
+    `status_update` with `step=reasoning` marks each moment the model starts working (on a CPU it
+    can be silent for a while); `step=thinking` reports hidden reasoning tokens, if enabled.
     """
 
     def event(type_: EventType, **data) -> Event:
         return Event(type=type_, source=SOURCE, session_id=request.session_id, data=data)
 
+    def reasoning(round_: int) -> Event:
+        return event(EventType.STATUS_UPDATE, step="reasoning", round=round_)
+
     try:
         tools = await load_read_only_tools(config.diagnostics_mcp_url, request.customer_id)
-        graph = build_graph(llm, tools)
+        graph = build_graph(llm, tools, apply_thinking_mode(SYSTEM_PROMPT, config))
         messages = [*map(_to_message, request.history), HumanMessage(request.message)]
         yield event(EventType.STATUS_UPDATE, step="diagnosis_started", tools=len(tools))
+        model_round = 1
+        yield reasoning(model_round)
 
         calls: dict[str, dict] = {}
         stream_filter: ThinkingFilter | None = None
         stream_id: str | None = None
+        hidden_chunks = 0
         async for mode, payload in graph.astream(
             {"messages": messages},
             {"recursion_limit": MAX_GRAPH_STEPS},
@@ -68,9 +79,13 @@ async def diagnose(
                 text = stream_filter.feed(chunk.text)
                 if text:
                     yield event(EventType.AGENT_MESSAGE_DELTA, message_id=stream_id, text=text)
+                elif stream_filter.thinking:
+                    hidden_chunks += 1
+                    if hidden_chunks % THINKING_REPORT_EVERY == 0:
+                        yield event(EventType.STATUS_UPDATE, step="thinking", tokens=hidden_chunks)
                 continue
 
-            for node_update in payload.values():
+            for node_name, node_update in payload.items():
                 for message in node_update["messages"]:
                     if isinstance(message, AIMessage):
                         message_id = stream_id or message.id or uuid.uuid4().hex
@@ -79,7 +94,7 @@ async def diagnose(
                             if rest:
                                 yield event(EventType.AGENT_MESSAGE_DELTA,
                                             message_id=message_id, text=rest)
-                        stream_filter, stream_id = None, None
+                        stream_filter, stream_id, hidden_chunks = None, None, 0
                         text = strip_thinking(message.text)
                         if text or not message.tool_calls:
                             yield event(EventType.AGENT_MESSAGE, message_id=message_id,
@@ -97,6 +112,10 @@ async def diagnose(
                             tool=call.get("name", message.name), status="completed",
                             result=_parse(message.content),
                         )
+                if node_name == "tools":
+                    # The model runs again on the tool results.
+                    model_round += 1
+                    yield reasoning(model_round)
     except GraphRecursionError:
         yield event(EventType.ERROR, message="The agent did not reach an answer in time.")
     except Exception as exc:

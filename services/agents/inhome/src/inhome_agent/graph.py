@@ -16,11 +16,11 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
-def build_graph(llm: BaseChatModel, tools: list[BaseTool]):
+def build_graph(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str = SYSTEM_PROMPT):
     model = llm.bind_tools(tools)
 
     async def call_model(state: AgentState) -> dict:
-        reply = await model.ainvoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
+        reply = await model.ainvoke([SystemMessage(system_prompt), *state["messages"]])
         return {"messages": [reply]}
 
     graph = StateGraph(AgentState)

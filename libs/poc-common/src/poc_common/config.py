@@ -24,6 +24,9 @@ class Config(BaseSettings):
     )
     llm_temperature: float = 0.0
     llm_timeout_s: float = 300.0
+    # Hidden reasoning ("thinking") makes small models slower by minutes on CPU; off by default.
+    llm_thinking: bool = False
+    llm_max_tokens: int | None = 800
 
     # Data stores
     database_url: str = "postgresql://dba:dba_local_pw@localhost:5432/dba"

@@ -40,7 +40,8 @@ def test_turn_streams_routing_agent_progress_and_answer(inhome, orchestrator):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert [e.type for e in events if e.type is not EventType.AGENT_MESSAGE_DELTA] == [
+    assert [e.type for e in events if e.type is not EventType.AGENT_MESSAGE_DELTA
+            and e.data.get("step") != "reasoning"] == [
         EventType.STATUS_UPDATE,   # orchestrator: routing decision
         EventType.AGENT_HANDOFF,   # orchestrator -> inhome-agent
         EventType.STATUS_UPDATE,   # agent: diagnosis started
@@ -48,6 +49,7 @@ def test_turn_streams_routing_agent_progress_and_answer(inhome, orchestrator):
         EventType.AGENT_MESSAGE,
         EventType.DONE,
     ]
+    assert [e.data["round"] for e in events if e.data.get("step") == "reasoning"] == [1, 2, 3]
     deltas = [e.data["text"] for e in events if e.type is EventType.AGENT_MESSAGE_DELTA]
     assert "".join(deltas) == "Findings: PPP down, internet light orange."
     assert len(deltas) > 1

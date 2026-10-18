@@ -70,7 +70,7 @@ def stream_turn(session_id: str):
     conn.close()
 
 
-def run_attempt(attempt: int) -> list[str]:
+def run_attempt(attempt: int) -> tuple[list[str], dict]:
     request_json("POST", f"{ORCHESTRATOR}/v1/demo/customers/{CUSTOMER}/reset")
     session = request_json("POST", f"{ORCHESTRATOR}/v1/sessions",
                            {"customer_id": CUSTOMER, "expert_name": "e2e"})
@@ -78,16 +78,18 @@ def run_attempt(attempt: int) -> list[str]:
     print(f"[expert] {MESSAGE}")
 
     tools, deltas, final, errors = [], [], "", []
-    first_token_at = None
+    timing: dict[str, float] = {}
     for kind, data, at in stream_turn(session["session_id"]):
+        timing.setdefault("first_event", at)
         if kind == "tool_call" and data.get("status") == "started":
+            timing.setdefault("first_tool", at)
             tools.append(data["tool"])
             print(f"\n  [{at:6.1f}s] tool  {data['tool']}", flush=True)
         elif kind == "agent_handoff":
             print(f"  [{at:6.1f}s] handoff -> {data.get('to_agent')}", flush=True)
         elif kind == "agent_message_delta":
-            if first_token_at is None:
-                first_token_at = at
+            if "first_token" not in timing:
+                timing["first_token"] = at
                 print(f"  [{at:6.1f}s] answer: ", end="", flush=True)
             deltas.append(data.get("text", ""))
             print(data.get("text", ""), end="", flush=True)
@@ -97,6 +99,7 @@ def run_attempt(attempt: int) -> list[str]:
             errors.append(data.get("message", ""))
             print(f"\n  [{at:6.1f}s] ERROR {data.get('message')}", flush=True)
         elif kind == "done":
+            timing["total"] = at
             print(f"\n  [{at:6.1f}s] done", flush=True)
 
     problems = []
@@ -108,9 +111,35 @@ def run_attempt(attempt: int) -> list[str]:
         problems.append(f"answer was not streamed ({len(deltas)} delta events)")
     if not final.strip():
         problems.append("no final answer")
+    metrics = {**timing, "tools": tools, "deltas": len(deltas), "answer": final}
     if not problems:
-        print(f"[result] tools={tools} deltas={len(deltas)} first_token={first_token_at:.1f}s")
-    return problems
+        print(f"[result] tools={tools} deltas={len(deltas)} "
+              + " ".join(f"{k}={v:.1f}s" for k, v in timing.items()))
+    return problems, metrics
+
+
+def write_summary(metrics: dict, passed: bool) -> None:
+    """Add a latency table to the GitHub Actions run page (no-op elsewhere)."""
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+
+    def fmt(key: str) -> str:
+        return f"{metrics[key]:.1f} s" if key in metrics else "–"
+
+    answer = metrics.get("answer", "").replace("\n", " ")
+    with open(path, "a", encoding="utf-8") as summary:
+        summary.write(
+            f"### End-to-end conversation {'✅' if passed else '❌'}\n\n"
+            f"Customer `{CUSTOMER}` · model `{os.getenv('OLLAMA_CHAT_MODEL', 'qwen3:4b')}` "
+            f"on a CPU-only runner\n\n"
+            "| First event | First tool call | First answer token | Whole turn | Tools | Tokens |\n"
+            "|---|---|---|---|---|---|\n"
+            f"| {fmt('first_event')} | {fmt('first_tool')} | {fmt('first_token')} | "
+            f"{fmt('total')} | {', '.join(metrics.get('tools', [])) or '–'} | "
+            f"{metrics.get('deltas', 0)} |\n\n"
+            f"> {answer[:600]}\n\n"
+        )
 
 
 def main() -> None:
@@ -120,12 +149,15 @@ def main() -> None:
     print(f"[ready] scenario customers: {', '.join(customers)}")
 
     # Small local models are not fully deterministic, so allow one retry.
+    metrics: dict = {}
     for attempt in range(1, ATTEMPTS + 1):
-        problems = run_attempt(attempt)
+        problems, metrics = run_attempt(attempt)
         if not problems:
+            write_summary(metrics, passed=True)
             print("\nE2E PASSED - real-time troubleshooting conversation works end to end.")
             return
         print(f"[attempt {attempt}] problems: {'; '.join(problems)}")
+    write_summary(metrics, passed=False)
     sys.exit("\nE2E FAILED")
 
 

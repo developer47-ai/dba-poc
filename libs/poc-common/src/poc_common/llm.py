@@ -18,6 +18,7 @@ def get_chat_model(config: Config | None = None, **overrides: Any):
         "api_key": config.llm_api_key,
         "temperature": config.llm_temperature,
         "timeout": config.llm_timeout_s,
+        "max_tokens": config.llm_max_tokens,
         "streaming": True,
     }
     params.update(overrides)
@@ -46,6 +47,21 @@ def strip_thinking(text: str) -> str:
     return re.sub(r"(?s)<think>.*?</think>", "", text).strip()
 
 
+NO_THINK_SWITCH = "/no_think"
+
+
+def apply_thinking_mode(system_prompt: str, config: Config | None = None) -> str:
+    """Append Qwen3's `/no_think` soft switch unless thinking is enabled.
+
+    Qwen3 otherwise writes a long hidden reasoning block before every reply and tool call, which
+    on a CPU costs minutes per turn while the user sees nothing.
+    """
+    config = config or get_config()
+    if config.llm_thinking or not config.chat_model.lower().startswith("qwen3"):
+        return system_prompt
+    return f"{system_prompt.rstrip()}\n{NO_THINK_SWITCH}"
+
+
 class ThinkingFilter:
     """Streaming version of `strip_thinking`: feed token chunks, get back only visible text.
 
@@ -59,6 +75,11 @@ class ThinkingFilter:
         self._buffer = ""
         self._inside = False
         self._started = False
+
+    @property
+    def thinking(self) -> bool:
+        """True while the stream is inside a <think> block."""
+        return self._inside
 
     def feed(self, chunk: str) -> str:
         self._buffer += chunk

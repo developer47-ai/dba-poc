@@ -113,6 +113,11 @@ All settings have working defaults. To override them (for example `OLLAMA_CHAT_M
 create a `.env` file next to `docker-compose.yml`; see the variables used in the compose file.
 NVIDIA GPU users: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`.
 
+**Speed on CPU.** Qwen3's hidden reasoning is off by default (`LLM_THINKING=false`), Ollama uses
+one request slot and an 8k context (`OLLAMA_NUM_PARALLEL`, `OLLAMA_CONTEXT_LENGTH`), and the chat
+model is loaded into memory during startup. Every CI run publishes the measured time to first tool
+call, first answer token and whole turn on its run page.
+
 | Service | Port (localhost only) | Purpose |
 |---|---|---|
 | Chat UI (Streamlit) | 8501 | Expert console |

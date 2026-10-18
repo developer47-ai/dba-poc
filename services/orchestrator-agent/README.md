@@ -20,6 +20,8 @@ GET  /health
 | `status_update` (`step=routing`) | orchestrator | Which agent was chosen and why |
 | `agent_handoff` | orchestrator | The conversation moves to another agent |
 | `status_update` (`step=diagnosis_started`) | agent | The agent started |
+| `status_update` (`step=reasoning`, `round`) | agent | The model starts working (again after tool results) |
+| `status_update` (`step=thinking`, `tokens`) | agent | Hidden reasoning progress, only if `LLM_THINKING=true` |
 | `tool_call` (`started` / `completed`) | agent | A diagnostic tool runs, with its result |
 | `agent_message_delta` | agent | Answer text, streamed token by token as the model writes it |
 | `agent_message` (`final=true/false`) | agent | The complete message; `final=false` is narration before tool calls |
