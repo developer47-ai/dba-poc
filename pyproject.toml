@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Local multi-agent connectivity troubleshooting POC (workspace root)"
 requires-python = ">=3.12"
 dependencies = [
-  "poc-common", "sop-kit", "network-simulator", "network-diagnostics-mcp", "inhome-agent",
-  "orchestrator-agent", "chat-ui",
+  "poc-common", "sop-kit", "knowledge-base", "network-simulator", "network-diagnostics-mcp",
+  "knowledge-mcp", "inhome-agent", "orchestrator-agent", "chat-ui",
 ]
 
 [tool.uv]
@@ -20,8 +20,10 @@ members = [
 [tool.uv.sources]
 poc-common = { workspace = true }
 sop-kit = { workspace = true }
+knowledge-base = { workspace = true }
 network-simulator = { workspace = true }
 network-diagnostics-mcp = { workspace = true }
+knowledge-mcp = { workspace = true }
 inhome-agent = { workspace = true }
 orchestrator-agent = { workspace = true }
 chat-ui = { workspace = true }
@@ -37,7 +39,10 @@ dev = [
 asyncio_mode = "auto"
 addopts = "--import-mode=importlib"
 testpaths = ["libs", "services"]
-markers = ["llm: needs a running Ollama and the models (set RUN_LLM_TESTS=1)"]
+markers = [
+  "llm: needs a running Ollama and the models (set RUN_LLM_TESTS=1)",
+  "pg: needs Postgres with pgvector (set RUN_PG_TESTS=1 and DATABASE_URL)",
+]
 
 [tool.ruff]
 line-length = 100
@@ -48,6 +53,6 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
 known-first-party = [
-  "poc_common", "sop_kit", "network_simulator", "network_diagnostics_mcp", "inhome_agent",
-  "orchestrator", "chat_ui",
+  "poc_common", "sop_kit", "knowledge_base", "network_simulator", "network_diagnostics_mcp",
+  "knowledge_mcp", "inhome_agent", "orchestrator", "chat_ui",
 ]

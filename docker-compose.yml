@@ -13,8 +13,11 @@ x-service-env: &service-env
   LLM_THINKING: ${LLM_THINKING:-false}
   NETWORK_SIMULATOR_URL: http://network-simulator:8300
   DIAGNOSTICS_MCP_URL: http://network-diagnostics-mcp:8101/mcp
+  KNOWLEDGE_MCP_URL: http://knowledge-mcp:8105/mcp
   INHOME_AGENT_URL: http://inhome-agent:8201
   ORCHESTRATOR_URL: http://orchestrator:8000
+  DATABASE_URL: postgresql://${POSTGRES_USER:-dba}:${POSTGRES_PASSWORD:-dba_local_pw}@postgres:5432/${POSTGRES_DB:-dba}
+  KNOWLEDGE_DIR: /app/knowledge
 
 x-health: &health
   interval: 10s
@@ -107,6 +110,39 @@ services:
     healthcheck:
       <<: *health
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8300/health', timeout=4)"]
+
+  # ---- Knowledge (RAG) -----------------------------------------------------------------------
+  # One-shot job: validate, chunk and embed knowledge/ into Postgres + pgvector (skips unchanged).
+  kb-ingestion:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: knowledge-base, MODULE: knowledge_base.ingest }
+    image: dba-poc/kb-ingestion:local
+    container_name: dba-kb-ingestion
+    restart: "no"
+    environment: *service-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      ollama-init: { condition: service_completed_successfully }
+
+  knowledge-mcp:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: knowledge-mcp, MODULE: knowledge_mcp }
+    image: dba-poc/knowledge-mcp:local
+    container_name: dba-knowledge-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_MCP_PORT:-8105}:8105"
+    environment: *service-env
+    depends_on:
+      kb-ingestion: { condition: service_completed_successfully }
+      ollama: { condition: service_healthy }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8105/health', timeout=4)"]
 
   # ---- Platform ------------------------------------------------------------------------------
   ollama:

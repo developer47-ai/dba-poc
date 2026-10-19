@@ -27,6 +27,7 @@ ENV PATH=/opt/venv/bin:$PATH \
 RUN useradd --create-home --uid 10001 app
 COPY --from=build /opt/venv /opt/venv
 COPY data /app/data
+COPY knowledge /app/knowledge
 WORKDIR /app
 USER app
 CMD ["sh", "-c", "exec python -m \"$SERVICE_MODULE\""]

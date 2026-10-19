@@ -18,6 +18,18 @@ jobs:
     name: Lint and unit tests
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    services:
+      # Real Postgres + pgvector so the knowledge-store contract tests also run against it.
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg17
+        env:
+          POSTGRES_USER: dba
+          POSTGRES_PASSWORD: dba_local_pw
+          POSTGRES_DB: dba
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dba -d dba"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v7
 
@@ -35,8 +47,11 @@ jobs:
       - name: Validate the SOP knowledge library
         run: uv run python -m sop_kit knowledge
 
-      - name: Unit and integration tests (scripted model)
-        run: uv run pytest -q
+      - name: Unit and integration tests (scripted model, real pgvector)
+        env:
+          RUN_PG_TESTS: "1"
+          DATABASE_URL: postgresql://dba:dba_local_pw@localhost:5432/dba
+        run: uv run pytest -q -rs
 
   platform:
     name: Containers, local LLM and end-to-end chat

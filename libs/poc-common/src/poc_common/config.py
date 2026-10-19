@@ -35,6 +35,13 @@ class Config(BaseSettings):
     database_url: str = "postgresql://dba:dba_local_pw@localhost:5432/dba"
     valkey_url: str = "redis://localhost:6379/0"
 
+    # Knowledge base (RAG)
+    knowledge_dir: str = "knowledge"
+    embed_dimensions: int = 1024  # bge-m3
+    kb_schema: str = "kb"
+    # Minimum cosine similarity for a vector-only match to count as relevant.
+    kb_min_similarity: float = 0.45
+
     # Backend systems (simulated)
     network_simulator_url: str = "http://localhost:8300"
 

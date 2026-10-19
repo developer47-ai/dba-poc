@@ -125,6 +125,7 @@ publishes the measured time to first tool call, first answer token and whole tur
 |---|---|---|
 | Chat UI (Streamlit) | 8501 | Expert console |
 | Orchestrator | 8000 | Sessions and streamed turns (`/docs` for the API) |
+| Knowledge MCP | 8105 | SOP search and navigation; try `/v1/search?q=LOS+light+red` |
 | Ollama | 11434 | Local LLM, OpenAI-compatible API at `/v1` |
 | PostgreSQL + pgvector | 5432 | Data and vector search (user `dba`, db `dba`) |
 | Valkey | 6379 | Cache and rate limits |
@@ -162,9 +163,9 @@ Built step by step; each step is one pull request and ends in something you can 
 - [x] **Step 6 — `chat-ui`** (Streamlit console, live tool activity, token streaming) + all services in `docker compose` + end-to-end CI
 
 ### Phase C — Knowledge & process → **M2: SOP-guided troubleshooting with citations**
-- [ ] **Step 7 — SOP library + `kb-ingestion` + `knowledge-mcp`** (hybrid search, SOP step graph)
+- [x] **Step 7 — SOP library + `kb-ingestion` + `knowledge-mcp`** (hybrid search, SOP step graph)
   - [x] 7a — SOP format, [`knowledge/`](knowledge) library (8 procedures, 2 references), `sop-kit` parser, validator and chunker; validated in CI
-  - [ ] 7b — Postgres/pgvector store, embedding ingestion, hybrid search, `knowledge-mcp` tools
+  - [x] 7b — Postgres/pgvector store, idempotent embedding ingestion, hybrid search (BM25/full-text + vectors, RRF, relevance gate), `knowledge-mcp` with deterministic SOP navigation
 - [ ] **Step 8 — SOP-guided agents** (follow steps, cite `sop_id/step_id`, no-SOP fallback)
 
 ### Phase D — Full multi-agent platform → **M3: all scenarios**
