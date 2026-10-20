@@ -8,6 +8,12 @@ from typing import Protocol
 from poc_common.config import Config, get_config
 
 TOKEN = re.compile(r"[a-z0-9]+")
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do", "does", "for", "from",
+    "has", "have", "how", "i", "if", "in", "into", "is", "it", "its", "my", "no", "not", "of",
+    "on", "or", "our", "so", "that", "the", "their", "them", "then", "there", "they", "this",
+    "to", "was", "we", "what", "when", "which", "while", "who", "why", "will", "with", "you",
+}
 
 
 class Embedder(Protocol):
@@ -57,7 +63,7 @@ class HashingEmbedder:
     def _embed(self, text: str) -> list[float]:
         counts: dict[str, int] = {}
         for token in TOKEN.findall(text.lower()):
-            if len(token) >= 2:
+            if len(token) >= 2 and token not in STOPWORDS:
                 counts[token] = counts.get(token, 0) + 1
         vector = [0.0] * self.dimensions
         for token, count in counts.items():

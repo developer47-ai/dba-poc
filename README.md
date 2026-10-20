@@ -166,7 +166,7 @@ Built step by step; each step is one pull request and ends in something you can 
 - [x] **Step 7 — SOP library + `kb-ingestion` + `knowledge-mcp`** (hybrid search, SOP step graph)
   - [x] 7a — SOP format, [`knowledge/`](knowledge) library (8 procedures, 2 references), `sop-kit` parser, validator and chunker; validated in CI
   - [x] 7b — Postgres/pgvector store, idempotent embedding ingestion, hybrid search (BM25/full-text + vectors, RRF, relevance gate), `knowledge-mcp` with deterministic SOP navigation
-- [ ] **Step 8 — SOP-guided agents** (follow steps, cite `sop_id/step_id`, no-SOP fallback)
+- [x] **Step 8 — SOP-guided agents** (follow steps, cite `sop_id/step_id`, stop for approval, no-SOP fallback)
 
 ### Phase D — Full multi-agent platform → **M3: all scenarios**
 - [ ] **Step 9 — `installed-base-mcp` + `quickscan-service`**

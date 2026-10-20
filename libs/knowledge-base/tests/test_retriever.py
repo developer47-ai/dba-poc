@@ -46,3 +46,9 @@ def test_find_procedures_respects_agent_and_technology(retriever):
 
 def test_find_procedures_without_a_match(retriever):
     assert retriever.find_procedures("chocolate cake recipe", Filters(agent="inhome")) == []
+
+
+def test_one_shared_common_word_is_not_enough(retriever):
+    """'remote' appears in SOP-IH-001 ("a remote reboot") but the request is unrelated."""
+    assert retriever.find_procedures(
+        "The smart TV remote stopped responding", Filters(agent="inhome")) == []

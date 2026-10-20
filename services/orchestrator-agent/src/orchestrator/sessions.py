@@ -22,6 +22,8 @@ class Session:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     history: list[ChatTurn] = field(default_factory=list)
     active_agent: str | None = None
+    # Resumable position per agent (e.g. the SOP step it waits at), from `agent_state` events.
+    agent_state: dict[str, dict] = field(default_factory=dict)
     busy_since: float | None = None
 
     @property
@@ -42,6 +44,7 @@ class Session:
             "expert_name": self.expert_name,
             "created_at": self.created_at.isoformat(),
             "active_agent": self.active_agent,
+            "agent_state": self.agent_state,
             "busy": self.busy,
             "history": [t.model_dump() for t in self.history],
         }

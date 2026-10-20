@@ -75,6 +75,7 @@ services:
     environment: *service-env
     depends_on:
       network-diagnostics-mcp: { condition: service_healthy }
+      knowledge-mcp: { condition: service_healthy }
       ollama: { condition: service_healthy }
       ollama-init: { condition: service_completed_successfully }
     healthcheck:

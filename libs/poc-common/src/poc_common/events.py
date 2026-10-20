@@ -24,6 +24,9 @@ class EventType(StrEnum):
     INCIDENT_SUGGESTION = "incident_suggestion"
     SWAP_ORDER_SUGGESTION = "swap_order_suggestion"
     APPOINTMENT_SUGGESTION = "appointment_suggestion"
+    # Internal: an agent's resumable position (e.g. the SOP step it waits at). The orchestrator
+    # stores it with the session and sends it back on the next turn; it is not shown to users.
+    AGENT_STATE = "agent_state"
     ERROR = "error"
     HEARTBEAT = "heartbeat"
     DONE = "done"
@@ -71,6 +74,8 @@ class AgentRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     session_id: str | None = None
     history: list[ChatTurn] = Field(default_factory=list)
+    # The agent's own state from its last `agent_state` event in this session, if any.
+    state: dict[str, Any] | None = None
 
 
 class ConsentRequest(BaseModel):

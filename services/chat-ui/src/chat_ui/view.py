@@ -27,13 +27,23 @@ class TurnView:
     error: str | None = None
     done: bool = False
     message_id: str | None = None
+    procedure: str | None = None
+    citations: list[str] = field(default_factory=list)
+    consent: dict[str, Any] | None = None
 
     @property
     def summary_label(self) -> str:
         if self.error:
             return "Something went wrong"
         agent = self.agent or "agent"
-        return f"{agent} · {len(self.tools)} tool call(s)"
+        sop = f" · {self.procedure}" if self.procedure else ""
+        return f"{agent}{sop} · {len(self.tools)} tool call(s)"
+
+
+REASONING_LABELS = {
+    "intent": "🧠 Understanding the request…",
+    "answer": "🧠 Writing the answer…",
+}
 
 
 def summarize(result: Any, limit: int = 140) -> str:
@@ -61,9 +71,44 @@ def apply_event(view: TurnView, event: Event) -> str | None:
             line = f"🧭 Routed to **{view.agent}** — {data.get('reason', '')}"
         case EventType.STATUS_UPDATE if data.get("step") == "diagnosis_started":
             view.status_label = f"{event.source} is diagnosing…"
-            line = f"🩺 **{event.source}** started ({data.get('tools', '?')} tools available)"
+            line = f"🩺 **{event.source}** started"
         case EventType.STATUS_UPDATE if data.get("step") == "reasoning":
-            view.status_label = f"🧠 {event.source} is reasoning (step {data.get('round', 1)})…"
+            purpose = data.get("purpose")
+            if purpose == "outcome":
+                view.status_label = f"🧠 Interpreting step {data.get('step_id')}…"
+            elif purpose in REASONING_LABELS:
+                view.status_label = REASONING_LABELS[purpose]
+            else:
+                view.status_label = f"🧠 {event.source} is reasoning (step {data.get('round', 1)})…"
+        case EventType.STATUS_UPDATE if data.get("step") == "intent":
+            asked = data.get("intent") == "question"
+            line = f"🗂️ Request type: {'knowledge question' if asked else 'troubleshooting'}"
+        case EventType.STATUS_UPDATE if data.get("step") == "sop_selected":
+            view.procedure = data.get("doc_id")
+            via = f" (continued from {data['via']})" if data.get("via") else ""
+            line = (f"📘 Following **{data.get('doc_id')}** v{data.get('version')} — "
+                    f"{data.get('title')}{via}")
+        case EventType.STATUS_UPDATE if data.get("step") == "sop_step":
+            view.status_label = (f"▶ {data.get('doc_id')} › {data.get('step_id')} — "
+                                 f"{data.get('title')}")
+            line = f"▶ **{data.get('step_id')}** — {data.get('title')} ({data.get('actor')})"
+        case EventType.STATUS_UPDATE if data.get("step") == "sop_outcome":
+            outcome = data.get("outcome") or "unclear"
+            who = " (expert's reply)" if data.get("source") == "expert" else ""
+            line = f"↳ {data.get('step_id')}: **{outcome}**{who} — {data.get('reason', '')}"
+        case EventType.STATUS_UPDATE if data.get("step") == "no_sop":
+            line = "⚠️ No approved procedure matches — exploratory check"
+        case EventType.STATUS_UPDATE if data.get("step") == "exploratory_started":
+            line = f"🔎 Exploratory check ({data.get('tools', '?')} read-only tools)"
+        case EventType.KNOWLEDGE_ARTICLE:
+            citation = data.get("citation", "")
+            if citation not in view.citations:
+                view.citations.append(citation)
+            line = f"📎 {citation} — {data.get('title', '')}"
+        case EventType.CONSENT_REQUEST:
+            view.consent = dict(data)
+            line = (f"🛑 Approval needed: `{data.get('action')}` "
+                    f"({data.get('sop_id')} › {data.get('step_id')})")
         case EventType.STATUS_UPDATE if data.get("step") == "thinking":
             view.status_label = f"🧠 Thinking… ({data.get('tokens', 0)} tokens)"
         case EventType.AGENT_HANDOFF:

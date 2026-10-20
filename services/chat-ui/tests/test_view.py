@@ -67,6 +67,46 @@ def test_reasoning_and_thinking_progress_update_the_label_only():
     assert view.status_label == "🧠 inhome-agent is reasoning (step 2)…" and lines == []
     apply_event(view, ev(EventType.STATUS_UPDATE, step="thinking", tokens=50))
     assert view.status_label == "🧠 Thinking… (50 tokens)" and view.log == []
+    apply_event(view, ev(EventType.STATUS_UPDATE, step="reasoning", purpose="outcome",
+                         step_id="S2"))
+    assert view.status_label == "🧠 Interpreting step S2…"
+    apply_event(view, ev(EventType.STATUS_UPDATE, step="reasoning", purpose="answer"))
+    assert view.status_label == "🧠 Writing the answer…" and view.log == []
+
+
+def test_sop_progress_citations_and_approval_are_shown():
+    view, lines = play(
+        ev(EventType.STATUS_UPDATE, step="intent", intent="troubleshoot"),
+        ev(EventType.STATUS_UPDATE, step="sop_selected", doc_id="SOP-IH-001", version="1.0",
+           title="No internet while the modem is online"),
+        ev(EventType.KNOWLEDGE_ARTICLE, doc_id="SOP-IH-001", citation="SOP-IH-001 v1.0",
+           title="No internet while the modem is online"),
+        ev(EventType.STATUS_UPDATE, step="sop_step", doc_id="SOP-IH-001", step_id="S2",
+           title="Check the indicator lights", actor="agent"),
+        ev(EventType.STATUS_UPDATE, step="sop_outcome", doc_id="SOP-IH-001", step_id="S2",
+           outcome="modem_stuck", reason="wan green, internet orange", source="agent"),
+        ev(EventType.CONSENT_REQUEST, action="reboot_device", sop_id="SOP-IH-001",
+           step_id="S3", risk="medium", description="Reboot the modem", consent_id="c1"),
+        ev(EventType.DONE, "orchestrator"),
+    )
+    assert lines == [
+        "🗂️ Request type: troubleshooting",
+        "📘 Following **SOP-IH-001** v1.0 — No internet while the modem is online",
+        "📎 SOP-IH-001 v1.0 — No internet while the modem is online",
+        "▶ **S2** — Check the indicator lights (agent)",
+        "↳ S2: **modem_stuck** — wan green, internet orange",
+        "🛑 Approval needed: `reboot_device` (SOP-IH-001 › S3)",
+    ]
+    assert view.citations == ["SOP-IH-001 v1.0"]
+    assert view.consent["action"] == "reboot_device"
+    assert view.summary_label == "agent · SOP-IH-001 · 0 tool call(s)"
+
+
+def test_exploratory_fallback_is_labelled():
+    _, lines = play(ev(EventType.STATUS_UPDATE, step="no_sop"),
+                    ev(EventType.STATUS_UPDATE, step="exploratory_started", tools=9))
+    assert lines == ["⚠️ No approved procedure matches — exploratory check",
+                     "🔎 Exploratory check (9 read-only tools)"]
 
 
 def test_failed_tool_and_error_are_visible():

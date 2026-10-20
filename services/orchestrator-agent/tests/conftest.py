@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.testclient import TestClient
 
 from inhome_agent import create_app as create_inhome_app
+from knowledge_mcp.testing import run_test_knowledge_server
 from network_diagnostics_mcp import create_server
 from network_simulator import Network
 from network_simulator import create_app as create_simulator_app
@@ -18,7 +19,8 @@ from poc_common.events import Event, EventType
 from poc_common.fake_llm import ScriptedChatModel
 from poc_common.testing import run_app_in_thread
 
-SCENARIO_DIR = Path(__file__).resolve().parents[3] / "data" / "scenarios"
+ROOT = Path(__file__).resolve().parents[3]
+SCENARIO_DIR = ROOT / "data" / "scenarios"
 
 
 @pytest.fixture(scope="module")
@@ -33,25 +35,31 @@ def mcp_url(simulator_url):
         yield f"{base}/mcp"
 
 
+@pytest.fixture(scope="module")
+def knowledge_url():
+    with run_test_knowledge_server(ROOT / "knowledge") as url:
+        yield url
+
+
 @pytest.fixture
-def inhome(mcp_url):
+def inhome(mcp_url, knowledge_url):
     """Start a real In-Home agent with a scripted model: url, llm = inhome(reply1, reply2...)."""
     with ExitStack() as stack:
 
         def start(*replies):
             llm = ScriptedChatModel(script=list(replies))
-            app = create_inhome_app(Config(diagnostics_mcp_url=mcp_url), llm)
-            return stack.enter_context(run_app_in_thread(app)), llm
+            config = Config(diagnostics_mcp_url=mcp_url, knowledge_mcp_url=knowledge_url)
+            return stack.enter_context(run_app_in_thread(create_inhome_app(config, llm))), llm
 
         yield start
 
 
 @pytest.fixture
 def fake_agent():
-    """Start a minimal agent: url, calls = fake_agent(delay=..., status=...)."""
+    """Start a minimal agent: url, calls = fake_agent(delay=..., status=..., state=...)."""
     with ExitStack() as stack:
 
-        def start(*, delay: float = 0.0, status: int = 200):
+        def start(*, delay: float = 0.0, status: int = 200, state: dict | None = None):
             calls: list[dict] = []
             app = FastAPI()
 
@@ -70,6 +78,9 @@ def fake_agent():
                     yield Event(type=EventType.AGENT_MESSAGE, source="inhome-agent",
                                 data={"message_id": "m1", "text": "late answer",
                                       "final": True}).to_sse()
+                    if state is not None:
+                        yield Event(type=EventType.AGENT_STATE, source="inhome-agent",
+                                    data={"state": state}).to_sse()
                     yield Event(type=EventType.DONE, source="inhome-agent").to_sse()
 
                 return StreamingResponse(body(), media_type="text/event-stream")

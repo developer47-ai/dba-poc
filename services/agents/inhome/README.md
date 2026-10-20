@@ -1,26 +1,62 @@
 # inhome-agent
 
 Specialist agent for problems inside the customer's home: modem, indicator lights, Wi-Fi settings
-and connected devices. It is a small LangGraph (`agent` ⇄ `tools`) that calls the
-network-diagnostics MCP tools and answers the support expert.
+and connected devices. **SOP-first**: it follows NetCo's approved troubleshooting procedures from
+the knowledge MCP server, step by step, and cites them.
 
-- **Read-only.** Only tools marked `readOnlyHint` are offered. Reboot and Wi-Fi reset are added
-  with the human-approval flow (Step 11).
-- **Customer scoped.** The code injects `customer_id` into every tool call and hides it from the
-  model's tool schema.
-- **Streams in real time** as SSE `Event`s: `status_update`, `tool_call` (started / completed),
-  `agent_message_delta` (answer tokens as they are generated, Qwen3 `<think>` text filtered out),
-  `agent_message` (complete text, `final` true for the answer), `error`, `done`.
-- **Fast on CPU.** The default model is the non-thinking Qwen3-4B Instruct-2507. For hybrid Qwen3
-  models, thinking is switched off (`reasoning_effort=none` plus the `/no_think` switch) unless
-  `LLM_THINKING=true`; `status_update` `step=reasoning` events show each moment the model is
-  working so the UI never looks frozen.
+## How a turn works
+
+```mermaid
+flowchart LR
+    S([request]) --> W{waiting for the expert's reply?}
+    W -- yes --> R[resume: match reply to the step's outcomes]
+    W -- no --> I[intent: troubleshoot or question?]
+    R -- matched --> E
+    R -- about something else --> I
+    I -- troubleshoot --> F[select_sop: find_troubleshooting_sop]
+    I -- question --> K[knowledge: search_knowledge + cited answer]
+    F -- found --> E[execute one SOP step]
+    F -- none --> X[exploratory read-only check]
+    E -- next step --> E
+    E -- approval / question / end --> C[compose: streamed answer with citations]
+```
+
+| Decision | Made by |
+|---|---|
+| Troubleshooting or knowledge question | LLM, choosing one of two options |
+| Which procedure | Hybrid search (`find_troubleshooting_sop`) |
+| Which tool a step runs | The SOP step (code calls the diagnostics MCP tool) |
+| What the tool result means | LLM **function call** `report_outcome(outcome, reason)`; `outcome` is an enum of the step's allowed outcomes plus `unclear` |
+| Which step comes next | `get_next_sop_step` on the knowledge server |
+| Wording of the answer | LLM, streamed, citing steps such as `[SOP-IH-001 v1.0 › S2]` |
+
+A turn stops at:
+
+- a step that **needs approval** (reboot, Wi-Fi reset, factory reset, orders): a
+  `consent_request` event is sent and the action is **not** carried out;
+- a step for the **expert or customer** (for example "reconnect the device"), or a result the
+  model calls `unclear`: the expert's next message is matched to that step's outcomes;
+- the **end** of a procedure: resolved, escalate, or hand over (for example to the access network).
+  "Continue with SOP-…" ends chain into the next procedure in the same turn.
+
+The agent is stateless: its SOP position is sent as an `agent_state` event, kept by the
+orchestrator and returned with the next request. If no procedure matches a troubleshooting
+request, an **exploratory** LangGraph agent (free choice of read-only tools) checks the line and
+says clearly that no SOP covers the problem.
+
+## Events
+
+`status_update` (`diagnosis_started`, `reasoning` with `purpose`, `intent`, `sop_selected`,
+`sop_step`, `sop_outcome`, `sop_resume_skipped`, `no_sop`, `exploratory_started`, `thinking`),
+`knowledge_article` (citation), `tool_call` (started / completed), `consent_request`,
+`agent_message_delta` (answer tokens), `agent_message` (`final`), `agent_state`, `error`, `done`.
 
 ## API
 
 ```http
 POST /v1/diagnose            # text/event-stream
-{ "customer_id": "C1002", "message": "Customer has no internet", "session_id": "s1", "history": [] }
+{ "customer_id": "C1002", "message": "Customer has no internet", "session_id": "s1",
+  "history": [], "state": null }
 
 GET /health
 ```
@@ -28,7 +64,7 @@ GET /health
 ## Run and test
 
 ```bash
-uv run python -m inhome_agent                 # port 8201; needs the diagnostics MCP server
-uv run pytest services/agents                 # scripted model, no Ollama needed
+uv run python -m inhome_agent                 # port 8201; needs the diagnostics and knowledge MCP servers
+uv run pytest services/agents                 # scripted model, real MCP servers in memory
 RUN_LLM_TESTS=1 uv run pytest services/agents # also runs the live-model test (needs Ollama)
 ```

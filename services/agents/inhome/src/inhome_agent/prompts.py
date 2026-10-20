@@ -17,3 +17,8 @@ Findings: what the tools showed.
 Diagnosis: the most likely cause.
 Recommended next step: one concrete action for the expert.
 """
+
+EXPLORATORY_NOTE = """
+IMPORTANT: No approved NetCo procedure (SOP) matches this problem. This is an exploratory \
+check. Start your answer with "No approved procedure covers this problem; exploratory check:" \
+and, if you cannot find the cause, recommend creating an incident (SOP-ESC-001)."""

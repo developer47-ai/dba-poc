@@ -2,7 +2,7 @@ import time
 
 import httpx
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage
 
 from orchestrator import create_app
 from orchestrator.routing import AgentRegistry
@@ -10,6 +10,12 @@ from poc_common.config import Config
 from poc_common.events import EventType, parse_sse
 from poc_common.fake_llm import tool_call_message
 from poc_common.testing import run_app_in_thread
+
+STUCK_MODEM = "The customer has no internet and the modem's internet light is orange"
+
+
+def choice(outcome: str) -> AIMessage:
+    return tool_call_message("report_outcome", {"outcome": outcome, "reason": "scripted"})
 
 
 def new_session(client: TestClient, customer_id: str = "C1002") -> str:
@@ -25,61 +31,63 @@ def send(client: TestClient, session_id: str, message: str, **headers):
     return response, parse_sse(response.text) if response.status_code == 200 else []
 
 
-def test_turn_streams_routing_agent_progress_and_answer(inhome, orchestrator):
+def test_turn_streams_the_sop_guided_diagnosis_end_to_end(inhome, orchestrator):
+    """Orchestrator -> In-Home agent -> knowledge MCP + diagnostics MCP -> simulator."""
     agent_url, _ = inhome(
-        tool_call_message("get_ppp_session", call_id="a"),
-        tool_call_message("get_led_status", call_id="b"),
-        AIMessage("Findings: PPP down, internet light orange."),
+        choice("troubleshoot"), choice("down"), choice("modem_stuck"),
+        AIMessage("Findings: PPP down [SOP-IH-001 v1.0 › S1]. Next step: approve the reboot."),
     )
     client = orchestrator(agent_url)
     session_id = new_session(client)
 
-    response, events = send(client, session_id, "Customer has no internet", **{
-        "X-Correlation-ID": "corr-9"
-    })
+    response, events = send(client, session_id, STUCK_MODEM, **{"X-Correlation-ID": "corr-9"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert [e.type for e in events if e.type is not EventType.AGENT_MESSAGE_DELTA
-            and e.data.get("step") != "reasoning"] == [
-        EventType.STATUS_UPDATE,   # orchestrator: routing decision
-        EventType.AGENT_HANDOFF,   # orchestrator -> inhome-agent
-        EventType.STATUS_UPDATE,   # agent: diagnosis started
-        EventType.TOOL_CALL, EventType.TOOL_CALL, EventType.TOOL_CALL, EventType.TOOL_CALL,
-        EventType.AGENT_MESSAGE,
-        EventType.DONE,
-    ]
-    assert [e.data["round"] for e in events if e.data.get("step") == "reasoning"] == [1, 2, 3]
-    deltas = [e.data["text"] for e in events if e.type is EventType.AGENT_MESSAGE_DELTA]
-    assert "".join(deltas) == "Findings: PPP down, internet light orange."
-    assert len(deltas) > 1
     assert events[1].data == {
         "from_agent": "orchestrator", "to_agent": "inhome-agent",
         "reason": "start with in-home diagnosis",
     }
-    assert [e.source for e in events[:2]] == ["orchestrator", "orchestrator"]
-    assert {e.source for e in events[2:-1]} == {"inhome-agent"}
-    assert events[-1].source == "orchestrator"
-    assert {e.session_id for e in events} == {session_id}
-    assert {e.correlation_id for e in events} == {"corr-9"}
+    steps = [e.data["step"] for e in events if e.type is EventType.STATUS_UPDATE]
+    assert steps[:3] == ["routing", "diagnosis_started", "reasoning"]
+    assert [e.data["step_id"] for e in events if e.data.get("step") == "sop_step"] == [
+        "S1", "S2", "S3"]
     completed = [e.data for e in events if e.type is EventType.TOOL_CALL
                  and e.data["status"] == "completed"]
+    assert [c["tool"] for c in completed] == ["get_ppp_session", "get_led_status"]
     assert completed[0]["result"]["status"] == "down"
+    consent = next(e.data for e in events if e.type is EventType.CONSENT_REQUEST)
+    assert consent["action"] == "reboot_device"
+    deltas = [e.data["text"] for e in events if e.type is EventType.AGENT_MESSAGE_DELTA]
+    assert len(deltas) > 1 and "".join(deltas).startswith("Findings: PPP down")
+
+    assert EventType.AGENT_STATE not in [e.type for e in events], "internal state stays internal"
+    assert [e.source for e in events[:2]] == ["orchestrator", "orchestrator"]
+    assert {e.source for e in events[2:-1]} == {"inhome-agent"}
+    assert events[-1].type is EventType.DONE and events[-1].source == "orchestrator"
+    assert {e.session_id for e in events} == {session_id}
+    assert {e.correlation_id for e in events} == {"corr-9"}
+    summary = client.get(f"/v1/sessions/{session_id}").json()
+    assert summary["agent_state"]["inhome-agent"]["sop"]["step_id"] == "S3"
 
 
-def test_history_is_kept_and_sent_on_the_next_turn(inhome, orchestrator):
-    agent_url, llm = inhome(AIMessage("PPP is down."), AIMessage("Recommend a modem reboot."))
+def test_history_and_agent_state_are_kept_for_the_next_turn(fake_agent, orchestrator):
+    saved = {"sop": {"doc_id": "SOP-IH-002", "step_id": "S7", "awaiting": "expert"}}
+    agent_url, calls = fake_agent(state=saved)
     client = orchestrator(agent_url)
     session_id = new_session(client)
 
-    send(client, session_id, "no internet")
-    _, second = send(client, session_id, "what next?")
+    send(client, session_id, "wifi problem")
+    _, second = send(client, session_id, "the laptop works again")
 
     assert EventType.AGENT_HANDOFF not in [e.type for e in second]
     assert second[0].data["reason"] == "follow-up in the ongoing diagnosis"
-    sent = llm.received[1][1:]
-    assert [type(m) for m in sent] == [HumanMessage, AIMessage, HumanMessage]
-    assert [m.content for m in sent] == ["no internet", "PPP is down.", "what next?"]
+    assert calls[0]["json"]["state"] is None
+    assert calls[1]["json"]["state"] == saved
+    assert calls[1]["json"]["history"] == [
+        {"role": "user", "content": "wifi problem"},
+        {"role": "assistant", "content": "late answer"},
+    ]
     summary = client.get(f"/v1/sessions/{session_id}").json()
     assert [t["role"] for t in summary["history"]] == ["user", "assistant"] * 2
     assert summary["active_agent"] == "inhome-agent" and summary["busy"] is False
@@ -95,7 +103,7 @@ def test_agent_receives_the_session_context_and_correlation_id(fake_agent, orche
     request = calls[0]
     assert request["json"] == {
         "customer_id": "C1003", "message": "wifi problem",
-        "session_id": session_id, "history": [],
+        "session_id": session_id, "history": [], "state": None,
     }
     assert request["headers"]["x-correlation-id"] == "corr-1"
 

@@ -24,12 +24,19 @@ def agent_events() -> list[Event]:
     words = [w + " " for w in ANSWER.split(" ")]
     words[-1] = words[-1].rstrip()
     return [
-        e(EventType.STATUS_UPDATE, step="diagnosis_started", tools=9),
+        e(EventType.STATUS_UPDATE, step="diagnosis_started"),
+        e(EventType.STATUS_UPDATE, step="sop_selected", doc_id="SOP-IH-001", version="1.0",
+          title="No internet while the modem is online"),
+        e(EventType.KNOWLEDGE_ARTICLE, doc_id="SOP-IH-001", citation="SOP-IH-001 v1.0",
+          title="No internet while the modem is online", kind="procedure"),
         e(EventType.TOOL_CALL, tool="get_ppp_session", arguments={}, status="started"),
         e(EventType.TOOL_CALL, tool="get_ppp_session", status="completed",
           result={"status": "down", "last_change": "2026-10-17T18:40:00Z"}),
+        e(EventType.CONSENT_REQUEST, action="reboot_device", sop_id="SOP-IH-001", step_id="S3",
+          risk="medium", description="Reboot the modem", consent_id="c1", arguments={}),
         *[e(EventType.AGENT_MESSAGE_DELTA, message_id="m1", text=w) for w in words],
         e(EventType.AGENT_MESSAGE, message_id="m1", text=ANSWER, final=True),
+        e(EventType.AGENT_STATE, state={"sop": {"step_id": "S3", "awaiting": "consent"}}),
         e(EventType.DONE),
     ]
 

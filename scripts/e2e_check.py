@@ -93,13 +93,26 @@ def run_attempt(attempt: int) -> tuple[list[str], dict]:
     print(f"[expert] {MESSAGE}")
 
     tools, deltas, final, errors = [], [], "", []
+    procedures, path, consent = [], [], None
     timing: dict[str, float] = {}
     for kind, data, at in stream_turn(session["session_id"]):
         timing.setdefault("first_event", at)
+        step = data.get("step")
         if kind == "tool_call" and data.get("status") == "started":
             timing.setdefault("first_tool", at)
             tools.append(data["tool"])
             print(f"\n  [{at:6.1f}s] tool  {data['tool']}", flush=True)
+        elif kind == "status_update" and step == "sop_selected":
+            procedures.append(data["doc_id"])
+            print(f"  [{at:6.1f}s] SOP   {data['doc_id']} — {data.get('title')}", flush=True)
+        elif kind == "status_update" and step == "sop_outcome":
+            path.append(f"{data['step_id']}={data.get('outcome')}")
+            print(f"  [{at:6.1f}s] step  {data['step_id']} -> {data.get('outcome')} "
+                  f"({data.get('reason', '')})", flush=True)
+        elif kind == "consent_request":
+            consent = data
+            print(f"  [{at:6.1f}s] APPROVAL NEEDED {data.get('action')} "
+                  f"({data.get('sop_id')} › {data.get('step_id')})", flush=True)
         elif kind == "agent_handoff":
             print(f"  [{at:6.1f}s] handoff -> {data.get('to_agent')}", flush=True)
         elif kind == "agent_message_delta":
@@ -126,9 +139,17 @@ def run_attempt(attempt: int) -> tuple[list[str], dict]:
         problems.append(f"answer was not streamed ({len(deltas)} delta events)")
     if not final.strip():
         problems.append("no final answer")
-    metrics = {**timing, "tools": tools, "deltas": len(deltas), "answer": final}
+    # C1002's modem is stuck: the SOP must lead to a remote reboot, which needs approval.
+    if procedures[:1] != ["SOP-IH-001"]:
+        problems.append(f"expected SOP-IH-001 first, followed {procedures}")
+    if not consent or consent.get("action") != "reboot_device":
+        problems.append(f"expected an approval request for reboot_device, got {consent}")
+    metrics = {**timing, "tools": tools, "deltas": len(deltas), "answer": final,
+               "procedures": procedures, "path": path,
+               "consent": f"{consent['action']} ({consent['sop_id']} › {consent['step_id']})"
+               if consent else "–"}
     if not problems:
-        print(f"[result] tools={tools} deltas={len(deltas)} "
+        print(f"[result] sop={procedures} path={path} tools={tools} deltas={len(deltas)} "
               + " ".join(f"{k}={v:.1f}s" for k, v in timing.items()))
     return problems, metrics
 
@@ -153,6 +174,9 @@ def write_summary(metrics: dict, passed: bool) -> None:
             f"| {fmt('first_event')} | {fmt('first_tool')} | {fmt('first_token')} | "
             f"{fmt('total')} | {', '.join(metrics.get('tools', [])) or '–'} | "
             f"{metrics.get('deltas', 0)} |\n\n"
+            f"**SOP:** {', '.join(metrics.get('procedures', [])) or '–'} · "
+            f"**path:** {' → '.join(metrics.get('path', [])) or '–'} · "
+            f"**approval requested:** {metrics.get('consent', '–')}\n\n"
             f"> {answer[:600]}\n\n"
         )
 

@@ -47,6 +47,11 @@ def test_full_conversation_turn(app, answer):
     stored = app.session_state.messages
     assert [m["role"] for m in stored] == ["user", "assistant"]
     assert stored[1]["content"] == answer and stored[1]["error"] is None
+    assert "📘 Following **SOP-IH-001** v1.0 — No internet while the modem is online" in text
+    assert stored[1]["citations"] == ["SOP-IH-001 v1.0"]
+    assert stored[1]["consent"]["action"] == "reboot_device"
+    assert "Approval needed" in app.warning[0].value and "reboot_device" in app.warning[0].value
+    assert any("Sources: SOP-IH-001 v1.0" in c.value for c in app.caption)
 
 
 def test_unreachable_orchestrator_shows_an_error(monkeypatch):

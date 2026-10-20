@@ -8,15 +8,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from knowledge_base.embedding import cosine
+from knowledge_base.embedding import STOPWORDS, cosine
 from sop_kit import Chunk, SopDocument
 
-STOPWORDS = {
-    "a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "do", "does", "for", "from",
-    "has", "have", "how", "i", "if", "in", "into", "is", "it", "its", "my", "no", "not", "of",
-    "on", "or", "our", "so", "that", "the", "their", "them", "then", "there", "they", "this",
-    "to", "was", "we", "what", "when", "which", "while", "who", "why", "will", "with", "you",
-}
 WORD = re.compile(r"[a-z0-9]+")
 
 

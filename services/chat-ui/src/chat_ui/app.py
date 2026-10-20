@@ -39,6 +39,18 @@ def render_activity(log: list[str]) -> None:
                 st.markdown(line)
 
 
+def render_extras(citations: list[str], consent: dict | None) -> None:
+    if citations:
+        st.caption("Sources: " + " · ".join(citations))
+    if consent:
+        st.warning(
+            f"🛑 **Approval needed** — `{consent['action']}` "
+            f"({consent['sop_id']} › {consent['step_id']}, risk: {consent['risk']}).  \n"
+            "The agent has **not** done this. Nothing changes for the customer until an expert "
+            "approves it."
+        )
+
+
 # ---- sidebar: customer and session --------------------------------------------------------------
 with st.sidebar:
     st.title("🛠️ DBA Expert Console")
@@ -85,6 +97,8 @@ for message in state.messages:
         if message["role"] == "assistant":
             render_activity(message.get("log", []))
         st.markdown(message["content"] or "_No answer._")
+        if message["role"] == "assistant":
+            render_extras(message.get("citations", []), message.get("consent"))
         if message.get("error"):
             st.error(message["error"])
 
@@ -108,12 +122,14 @@ if prompt := st.chat_input("Describe the customer's problem…"):
         except OrchestratorError as exc:
             view.error = str(exc)
         answer.markdown(view.text or "_No answer._")
+        render_extras(view.citations, view.consent)
         if view.error:
             st.error(view.error)
         status.update(
             label=view.summary_label, state="error" if view.error else "complete", expanded=False
         )
 
-    state.messages.append(
-        {"role": "assistant", "content": view.text, "log": view.log, "error": view.error}
-    )
+    state.messages.append({
+        "role": "assistant", "content": view.text, "log": view.log, "error": view.error,
+        "citations": view.citations, "consent": view.consent,
+    })

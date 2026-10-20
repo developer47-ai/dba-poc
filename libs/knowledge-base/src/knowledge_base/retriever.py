@@ -2,8 +2,10 @@
 
 Keyword search finds exact terms ("LOS", "PPP"); vector search finds meaning ("no light from the
 network"). RRF adds 1 / (60 + rank) from each list, so a chunk ranked well by both wins. A
-relevance gate keeps only chunks that matched a keyword or are similar enough in meaning, which
-lets the system answer "no matching SOP" instead of returning noise.
+relevance gate keeps a chunk only if it is similar enough in meaning; a keyword match lowers that
+bar (to KEYWORD_SIMILARITY_FACTOR of it) but cannot replace it, so one shared common word such as
+"remote" or "customer" does not make an unrelated procedure relevant. This lets the system answer
+"no matching SOP" instead of returning noise.
 """
 
 from dataclasses import dataclass
@@ -13,6 +15,7 @@ from knowledge_base.embedding import Embedder
 from knowledge_base.store import Filters, KnowledgeStore, StoredChunk
 
 RRF_K = 60
+KEYWORD_SIMILARITY_FACTOR = 0.6
 
 
 @dataclass
@@ -71,9 +74,11 @@ class HybridRetriever:
             for rank, (chunk_id, _) in enumerate(ranking, start=1):
                 fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (RRF_K + rank)
 
+        keyword_bar = self.min_similarity * KEYWORD_SIMILARITY_FACTOR
         relevant = [
             chunk_id for chunk_id in fused
-            if chunk_id in keyword_ids or similarity.get(chunk_id, 0.0) >= self.min_similarity
+            if similarity.get(chunk_id, 0.0) >= self.min_similarity
+            or (chunk_id in keyword_ids and similarity.get(chunk_id, 0.0) >= keyword_bar)
         ]
         ranked = sorted(relevant, key=lambda c: fused[c], reverse=True)[:top_k]
         chunks = self.store.get_chunks(ranked)

@@ -63,6 +63,7 @@ async def run_turn(
         message=message,
         session_id=session.session_id,
         history=session.history,
+        state=session.agent_state.get(decision.agent),
     )
     answer: list[str] = []
     try:
@@ -70,6 +71,10 @@ async def run_turn(
             client, router.registry.url(decision.agent), request, correlation_id
         ):
             if item.type is EventType.DONE:
+                continue
+            if item.type is EventType.AGENT_STATE:
+                # Internal bookkeeping: keep it for the agent's next turn, do not show it.
+                session.agent_state[decision.agent] = item.data.get("state") or {}
                 continue
             item.session_id, item.correlation_id = session.session_id, correlation_id
             if item.type is EventType.AGENT_MESSAGE and item.data.get("final", True) \
