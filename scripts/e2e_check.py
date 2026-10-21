@@ -62,17 +62,17 @@ def wait_for(name: str, url: str) -> None:
             time.sleep(3)
 
 
-def stream_turn(session_id: str):
-    """POST a message and yield (event_type, payload, seconds_since_start) as frames arrive."""
+def stream_post(path: str, body: dict):
+    """POST to the orchestrator and yield (event_type, payload, seconds_since_start) as frames
+    arrive."""
     target = urlparse(ORCHESTRATOR)
     conn = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=900)
     started = time.monotonic()
-    conn.request("POST", f"/v1/sessions/{session_id}/messages",
-                 body=json.dumps({"message": MESSAGE}),
+    conn.request("POST", path, body=json.dumps(body),
                  headers={"Content-Type": "application/json", "Accept": "text/event-stream"})
     response = conn.getresponse()
     if response.status != 200:
-        sys.exit(f"[fail] turn returned HTTP {response.status}: {response.read()[:300]!r}")
+        sys.exit(f"[fail] {path} returned HTTP {response.status}: {response.read()[:300]!r}")
     data: list[str] = []
     while line := response.readline():
         text = line.decode("utf-8").rstrip("\r\n")
@@ -85,7 +85,7 @@ def stream_turn(session_id: str):
     conn.close()
 
 
-def run_attempt(attempt: int) -> tuple[list[str], dict]:
+def run_attempt(attempt: int, approve: bool = True) -> tuple[list[str], dict]:
     request_json("POST", f"{ORCHESTRATOR}/v1/demo/customers/{CUSTOMER}/reset")
     session = request_json("POST", f"{ORCHESTRATOR}/v1/sessions",
                            {"customer_id": CUSTOMER, "expert_name": "e2e"})
@@ -95,7 +95,8 @@ def run_attempt(attempt: int) -> tuple[list[str], dict]:
     tools, deltas, final, errors = [], [], "", []
     procedures, path, consent = [], [], None
     timing: dict[str, float] = {}
-    for kind, data, at in stream_turn(session["session_id"]):
+    path_ = f"/v1/sessions/{session['session_id']}/messages"
+    for kind, data, at in stream_post(path_, {"message": MESSAGE}):
         timing.setdefault("first_event", at)
         step = data.get("step")
         if kind == "tool_call" and data.get("status") == "started":
@@ -145,13 +146,78 @@ def run_attempt(attempt: int) -> tuple[list[str], dict]:
     if not consent or consent.get("action") != "reboot_device":
         problems.append(f"expected an approval request for reboot_device, got {consent}")
     metrics = {**timing, "tools": tools, "deltas": len(deltas), "answer": final,
-               "procedures": procedures, "path": path,
+               "procedures": procedures, "path": path, "session_id": session["session_id"],
                "consent": f"{consent['action']} ({consent['sop_id']} › {consent['step_id']})"
                if consent else "–"}
     if not problems:
         print(f"[result] sop={procedures} path={path} tools={tools} deltas={len(deltas)} "
               + " ".join(f"{k}={v:.1f}s" for k, v in timing.items()))
+        problems, extra = decide(session["session_id"], consent["consent_id"], approve)
+        metrics.update(extra)
     return problems, metrics
+
+
+def decide(session_id: str, consent_id: str, approve: bool) -> tuple[list[str], dict]:
+    """Human-in-the-loop: send the expert's decision and check what the agent did with it."""
+    verdict = "APPROVE" if approve else "DECLINE"
+    print(f"\n[expert] {verdict} the reboot")
+    body = {"consent_id": consent_id, "approved": approve, "comment": "e2e check"}
+    calls, outcomes, final, errors, selected = [], [], "", [], []
+    ppp_after = reboot_result = None
+    started = time.monotonic()
+    for kind, data, at in stream_post(f"/v1/sessions/{session_id}/consent", body):
+        step = data.get("step")
+        if kind == "tool_call" and data.get("status") == "completed":
+            calls.append(data["tool"])
+            print(f"  [{at:6.1f}s] tool  {data['tool']} -> {json.dumps(data.get('result'))[:100]}",
+                  flush=True)
+            if data["tool"] == "reboot_device":
+                reboot_result = data.get("result")
+            if data["tool"] == "get_ppp_session":
+                ppp_after = data.get("result")
+        elif kind == "status_update" and step == "sop_outcome":
+            outcomes.append(f"{data['step_id']}={data.get('outcome')}")
+            print(f"  [{at:6.1f}s] step  {data['step_id']} -> {data.get('outcome')}", flush=True)
+        elif kind == "status_update" and step == "sop_selected":
+            selected.append(data["doc_id"])
+        elif kind == "agent_message" and data.get("final"):
+            final = data.get("text", "")
+        elif kind == "error":
+            errors.append(data.get("message", ""))
+    print(f"  answer: {final[:400]}")
+
+    problems = []
+    if errors:
+        problems.append(f"error events after the decision: {errors}")
+    if not final.strip():
+        problems.append("no answer after the decision")
+    if approve:
+        if not isinstance(reboot_result, dict) or reboot_result.get("accepted") is not True:
+            problems.append(f"the approved reboot did not run: {reboot_result}")
+        if "S3=done" not in outcomes or "S4=up" not in outcomes:
+            problems.append(f"expected S3=done and S4=up after the reboot, got {outcomes}")
+        if not isinstance(ppp_after, dict) or ppp_after.get("status") != "up":
+            problems.append(f"the PPP session should be up after the reboot: {ppp_after}")
+    else:
+        if "reboot_device" in calls:
+            problems.append("the reboot ran although it was declined")
+        if "S3=declined" not in outcomes:
+            problems.append(f"expected S3=declined, got {outcomes}")
+    state = session_state(session_id)
+    log = state.get("consent_log", [])
+    if len(log) != 1 or log[0]["approved"] is not approve:
+        problems.append(f"the decision was not audited correctly: {log}")
+    if state.get("pending_consent"):
+        problems.append("the approval request is still pending after the decision")
+    if not problems:
+        print(f"[result] {verdict.lower()}d: outcomes={outcomes} tools={calls} audit={len(log)}")
+    return problems, {"decision": verdict.lower(), "decision_path": outcomes,
+                      "decision_answer": final, "decision_s": time.monotonic() - started,
+                      "decision_tools": calls, "followed": selected}
+
+
+def session_state(session_id: str) -> dict:
+    return request_json("GET", f"{ORCHESTRATOR}/v1/sessions/{session_id}")
 
 
 def write_summary(metrics: dict, passed: bool) -> None:
@@ -177,7 +243,12 @@ def write_summary(metrics: dict, passed: bool) -> None:
             f"**SOP:** {', '.join(metrics.get('procedures', [])) or '–'} · "
             f"**path:** {' → '.join(metrics.get('path', [])) or '–'} · "
             f"**approval requested:** {metrics.get('consent', '–')}\n\n"
+            f"**Expert's decision: {metrics.get('decision', '–').upper()}** → "
+            f"{' → '.join(metrics.get('decision_path', [])) or '–'} · tools after the "
+            f"decision: {', '.join(metrics.get('decision_tools', [])) or 'none'}\n\n"
             f"> {answer[:600]}\n\n"
+            f"> After the decision: "
+            f"{metrics.get('decision_answer', '').replace(chr(10), ' ')[:500]}\n\n"
         )
 
 
@@ -240,17 +311,22 @@ def main() -> None:
     if knowledge_problems:
         sys.exit(f"\nE2E FAILED (knowledge): {'; '.join(knowledge_problems)}")
 
-    # Small local models are not fully deterministic, so allow one retry.
-    metrics: dict = {}
-    for attempt in range(1, ATTEMPTS + 1):
-        problems, metrics = run_attempt(attempt)
-        if not problems:
-            write_summary(metrics, passed=True)
-            print("\nE2E PASSED - knowledge search and real-time troubleshooting work end to end.")
-            return
-        print(f"[attempt {attempt}] problems: {'; '.join(problems)}")
-    write_summary(metrics, passed=False)
-    sys.exit("\nE2E FAILED")
+    # Small local models are not fully deterministic, so each scenario gets one retry.
+    results: list[dict] = []
+    for approve in (True, False):
+        metrics: dict = {}
+        for attempt in range(1, ATTEMPTS + 1):
+            problems, metrics = run_attempt(attempt, approve)
+            if not problems:
+                break
+            print(f"[attempt {attempt}] problems: {'; '.join(problems)}")
+        else:
+            write_summary(metrics, passed=False)
+            sys.exit(f"\nE2E FAILED ({'approve' if approve else 'decline'} scenario)")
+        write_summary(metrics, passed=True)
+        results.append(metrics)
+    print("\nE2E PASSED - knowledge search, SOP-guided troubleshooting and the approve / decline "
+          "flow work end to end.")
 
 
 if __name__ == "__main__":

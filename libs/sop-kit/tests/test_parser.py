@@ -32,7 +32,7 @@ def test_missing_front_matter_is_an_error():
 
 
 def test_invalid_next_field_is_an_error(valid_text):
-    broken = valid_text.replace("- next: { done: S3 }", "- next: S3")
+    broken = valid_text.replace("- next: { done: S3, declined: S3 }", "- next: S3")
     with pytest.raises(SopParseError, match="mapping"):
         parse_sop(broken, "bad.md")
 

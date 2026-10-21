@@ -78,6 +78,15 @@ def _validate_procedure(doc: SopDocument, known_doc_ids: set[str] | None) -> lis
         elif step.requires_consent:
             add(f"{where}: requires_consent is set but the step calls no tool")
 
+        if step.requires_consent:
+            others = [outcome for outcome in step.next if outcome != "declined"]
+            if "declined" not in step.next:
+                add(f"{where}: an approval step must have a 'declined' outcome "
+                    "(what happens when the expert says no)")
+            if len(others) != 1:
+                add(f"{where}: an approval step needs exactly one outcome besides 'declined' "
+                    f"(the result of the approved action), found {others}")
+
         if step.end is StepEnd.ESCALATE and not step.escalate_to:
             add(f"{where}: end 'escalate' needs escalate_to (a team or an SOP id)")
         if step.end is StepEnd.HANDOVER and step.handover_to not in HANDOVER_TARGETS:

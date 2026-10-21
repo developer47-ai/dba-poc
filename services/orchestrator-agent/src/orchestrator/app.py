@@ -4,6 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -14,6 +15,7 @@ from orchestrator.routing import AgentRegistry, Router
 from orchestrator.sessions import SessionStore, UnknownSessionError
 from orchestrator.turns import SOURCE, run_turn
 from poc_common.config import Config, get_config
+from poc_common.events import ConsentResponse
 from poc_common.logging import new_correlation_id, set_correlation_id, set_session_id, setup_logging
 from poc_common.sse import sse_with_heartbeats
 
@@ -86,6 +88,23 @@ def create_app(
     async def demo_reset_customer(customer_id: str) -> dict:
         return await simulator("POST", "/admin/reset", params={"customer_id": customer_id})
 
+    def stream_turn(session, message: str, consent: ConsentResponse | None, correlation_id: str):
+        async def events() -> AsyncIterator:
+            try:
+                async for item in run_turn(
+                    session, message, router=app.state.router, client=app.state.http,
+                    correlation_id=correlation_id, consent=consent,
+                ):
+                    yield item
+            finally:
+                session.end_turn()
+
+        return StreamingResponse(
+            sse_with_heartbeats(events(), heartbeat_s),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/v1/sessions/{session_id}/messages")
     async def post_message(
         session_id: str,
@@ -98,22 +117,39 @@ def create_app(
         session.start_turn()
         correlation_id = set_correlation_id(x_correlation_id or new_correlation_id())
         set_session_id(session_id)
+        return stream_turn(session, body.message, None, correlation_id)
 
-        async def events() -> AsyncIterator:
-            try:
-                async for item in run_turn(
-                    session, body.message, router=app.state.router,
-                    client=app.state.http, correlation_id=correlation_id,
-                ):
-                    yield item
-            finally:
-                session.end_turn()
+    @app.post("/v1/sessions/{session_id}/consent")
+    async def post_consent(
+        session_id: str,
+        body: ConsentResponse,
+        x_correlation_id: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        """The expert's decision on the approval request the agent is waiting for.
 
-        return StreamingResponse(
-            sse_with_heartbeats(events(), heartbeat_s),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        Only the pending request can be answered, and the action that runs is the one saved when
+        the agent asked: the decision carries no arguments, so it cannot change what is executed.
+        """
+        session = app.state.sessions.get(session_id)
+        if session.busy:
+            raise HTTPException(409, "a turn is already running for this session")
+        pending = session.pending_consent
+        if pending is None or pending.get("consent_id") != body.consent_id:
+            raise HTTPException(409, "no matching approval request is pending")
+        session.start_turn()
+        session.consent_log.append({
+            "consent_id": body.consent_id, "action": pending["action"],
+            "sop_id": pending.get("sop_id"), "step_id": pending.get("step_id"),
+            "risk": pending.get("risk"), "approved": body.approved, "comment": body.comment,
+            "decided_by": session.expert_name, "decided_at": datetime.now(UTC).isoformat(),
+        })
+        logger.info("consent %s for %s: %s", body.consent_id, pending["action"],
+                    "approved" if body.approved else "declined")
+        correlation_id = set_correlation_id(x_correlation_id or new_correlation_id())
+        set_session_id(session_id)
+        verdict = "Approved" if body.approved else "Declined"
+        message = f"{verdict}: {pending['action']}" + (f" ({body.comment})" if body.comment else "")
+        return stream_turn(session, message, body, correlation_id)
 
     return app
 

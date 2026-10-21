@@ -16,7 +16,7 @@ def test_next_step_follows_the_reported_outcome(doc):
     assert reboot["step_id"] == "S2"
     assert reboot["tool"] == "network-diagnostics.reboot_device"
     assert reboot["requires_consent"] is True
-    assert reboot["outcomes"] == ["done"]
+    assert reboot["outcomes"] == ["done", "declined"]
     assert reboot["citation"] == "SOP-TST-001 v1.0 › S2"
 
 

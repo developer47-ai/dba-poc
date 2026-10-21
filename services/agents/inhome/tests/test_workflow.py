@@ -71,7 +71,8 @@ def test_stuck_modem_follows_the_sop_to_the_reboot_approval(config):
     assert len(deltas) > 1 and "".join(d.data["text"] for d in deltas) == ANSWER
     assert saved_state(events) == {"sop": {
         "doc_id": "SOP-IH-001", "version": "1.0", "step_id": "S3", "awaiting": "consent",
-        "consent_id": consent["consent_id"]}}
+        "consent_id": consent["consent_id"], "action": "reboot_device",
+        "arguments": {"customer_id": "C1002"}}}
 
 
 def test_question_for_the_customer_waits_and_the_reply_continues_the_sop(config):

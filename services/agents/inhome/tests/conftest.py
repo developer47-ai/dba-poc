@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import httpx
 import pytest
 
 from knowledge_mcp.testing import run_test_knowledge_server
@@ -15,11 +16,21 @@ LIBRARY = ROOT / "knowledge"
 
 
 @pytest.fixture(scope="module")
-def mcp_url():
-    network = Network.from_directory(SCENARIO_DIR)
-    with run_app_in_thread(create_app(network)) as simulator_url:
-        with run_app_in_thread(create_server(simulator_url).streamable_http_app()) as base:
-            yield f"{base}/mcp"
+def simulator_url():
+    with run_app_in_thread(create_app(Network.from_directory(SCENARIO_DIR))) as url:
+        yield url
+
+
+@pytest.fixture(scope="module")
+def mcp_url(simulator_url):
+    with run_app_in_thread(create_server(simulator_url).streamable_http_app()) as base:
+        yield f"{base}/mcp"
+
+
+@pytest.fixture(autouse=True)
+def fresh_network(simulator_url):
+    """Approved actions change the simulated network, so every test starts from the scenarios."""
+    httpx.post(f"{simulator_url}/admin/reset").raise_for_status()
 
 
 @pytest.fixture(scope="session")

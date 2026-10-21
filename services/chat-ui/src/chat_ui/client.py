@@ -42,10 +42,18 @@ class OrchestratorClient:
 
     def stream_turn(self, session_id: str, message: str) -> Iterator[Event]:
         """Yield the turn's events as soon as each one arrives."""
+        return self._stream(f"/v1/sessions/{session_id}/messages", {"message": message})
+
+    def stream_consent(
+        self, session_id: str, consent_id: str, approved: bool, comment: str | None = None
+    ) -> Iterator[Event]:
+        """Send the expert's decision on the pending approval and stream the agent's follow-up."""
+        body = {"consent_id": consent_id, "approved": approved, "comment": comment}
+        return self._stream(f"/v1/sessions/{session_id}/consent", body)
+
+    def _stream(self, path: str, body: dict[str, Any]) -> Iterator[Event]:
         try:
-            with self._http.stream(
-                "POST", f"/v1/sessions/{session_id}/messages", json={"message": message}
-            ) as response:
+            with self._http.stream("POST", path, json=body) as response:
                 if response.status_code >= 400:
                     response.read()
                     raise OrchestratorError(_detail(response))

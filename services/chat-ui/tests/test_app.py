@@ -60,3 +60,35 @@ def test_unreachable_orchestrator_shows_an_error(monkeypatch):
     at = AppTest.from_file(APP, default_timeout=30)
     at.run()
     assert "Orchestrator not reachable" in at.sidebar.error[0].value
+
+
+def start_turn_with_pending_approval(app):
+    app.sidebar.selectbox[0].set_value("C1002")
+    app.sidebar.button[0].click().run()
+    app.chat_input[0].set_value("Customer has no internet").run()
+    assert not app.exception
+
+
+def test_pending_approval_shows_buttons_and_approving_continues_the_session(app):
+    start_turn_with_pending_approval(app)
+
+    assert app.session_state.pending_consent["action"] == "reboot_device"
+    assert [b.label for b in app.button if (b.key or "").startswith(("approve", "decline"))] == [
+        "✅ Approve", "🚫 Decline"]
+
+    app.button(key="approve-c1").click().run()
+
+    assert not app.exception
+    messages = app.session_state.messages
+    assert messages[-2] == {"role": "user", "content": "✅ Approved: `reboot_device`"}
+    assert messages[-1]["role"] == "assistant" and messages[-1]["error"] is None
+
+
+def test_declining_sends_a_decline_and_a_new_message_discards_the_pending_approval(app):
+    start_turn_with_pending_approval(app)
+    app.button(key="decline-c1").click().run()
+    assert app.session_state.messages[-2]["content"] == "🚫 Declined: `reboot_device`"
+
+    start_turn_with_pending_approval(app)
+    app.chat_input[0].set_value("What does an orange light mean?").run()
+    assert app.session_state.messages[-2]["content"] == "What does an orange light mean?"

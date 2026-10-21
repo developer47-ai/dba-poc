@@ -109,6 +109,12 @@ def apply_event(view: TurnView, event: Event) -> str | None:
             view.consent = dict(data)
             line = (f"🛑 Approval needed: `{data.get('action')}` "
                     f"({data.get('sop_id')} › {data.get('step_id')})")
+        case EventType.STATUS_UPDATE if data.get("step") == "consent_resolved":
+            verdict = "✅ Approved" if data.get("approved") else "🚫 Declined"
+            line = (f"{verdict}: `{data.get('action')}` "
+                    f"({data.get('sop_id')} › {data.get('step_id')})")
+        case EventType.STATUS_UPDATE if data.get("step") == "consent_rejected":
+            line = f"⚠️ Decision not applied: {data.get('reason')}"
         case EventType.STATUS_UPDATE if data.get("step") == "thinking":
             view.status_label = f"🧠 Thinking… ({data.get('tokens', 0)} tokens)"
         case EventType.AGENT_HANDOFF:

@@ -34,7 +34,7 @@ Outcome `up` when the status is up.
 - actor: agent
 - tool: network-diagnostics.reboot_device
 - requires_consent: true
-- next: { done: S3 }
+- next: { done: S3, declined: S3 }
 Reboot after approval.
 
 ### S3 — Done

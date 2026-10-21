@@ -103,7 +103,7 @@ def test_agent_receives_the_session_context_and_correlation_id(fake_agent, orche
     request = calls[0]
     assert request["json"] == {
         "customer_id": "C1003", "message": "wifi problem",
-        "session_id": session_id, "history": [], "state": None,
+        "session_id": session_id, "history": [], "state": None, "consent": None,
     }
     assert request["headers"]["x-correlation-id"] == "corr-1"
 
@@ -206,3 +206,105 @@ def test_demo_endpoints_report_a_missing_simulator():
                      registry=AgentRegistry({"inhome-agent": "http://unused"}))
     with TestClient(app) as client:
         assert client.get("/v1/demo/customers").status_code == 503
+
+
+REBOOT = {"consent_id": "c-123", "action": "reboot_device", "description": "Reboot the modem",
+          "risk": "medium", "arguments": {"customer_id": "C1002"}, "sop_id": "SOP-IH-001",
+          "step_id": "S3"}
+
+
+def decide(client, session_id: str, consent_id: str, approved: bool, comment=None):
+    response = client.post(f"/v1/sessions/{session_id}/consent", json={
+        "consent_id": consent_id, "approved": approved, "comment": comment})
+    return response, parse_sse(response.text) if response.status_code == 200 else []
+
+
+def test_pending_approval_is_tracked_and_hidden_state_stays_internal(fake_agent, orchestrator):
+    agent_url, _ = fake_agent(ask_consent=REBOOT)
+    client = orchestrator(agent_url)
+    session_id = new_session(client)
+
+    _, events = send(client, session_id, "no internet")
+
+    assert [e.data["action"] for e in events if e.type is EventType.CONSENT_REQUEST] == [
+        "reboot_device"]
+    summary = client.get(f"/v1/sessions/{session_id}").json()
+    assert summary["pending_consent"]["consent_id"] == "c-123"
+    assert summary["pending_consent"]["agent"] == "inhome-agent"
+    assert summary["consent_log"] == []
+
+
+def test_approval_reaches_the_agent_and_is_audited(fake_agent, orchestrator):
+    agent_url, calls = fake_agent(ask_consent=REBOOT)
+    client = orchestrator(agent_url)
+    session_id = new_session(client)
+    send(client, session_id, "no internet")
+
+    response, events = decide(client, session_id, "c-123", True, "customer agreed")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert events[-1].type is EventType.DONE
+    sent = calls[1]["json"]
+    assert sent["consent"] == {"consent_id": "c-123", "approved": True,
+                               "comment": "customer agreed"}
+    assert sent["message"] == "Approved: reboot_device (customer agreed)"
+    assert sent["state"]["sop"]["awaiting"] == "consent"
+    summary = client.get(f"/v1/sessions/{session_id}").json()
+    assert summary["pending_consent"] is None
+    [entry] = summary["consent_log"]
+    assert entry["approved"] is True and entry["action"] == "reboot_device"
+    assert entry["sop_id"] == "SOP-IH-001" and entry["step_id"] == "S3"
+    assert entry["decided_by"] == "Sam" and entry["decided_at"]
+    assert summary["history"][-2]["content"] == "Approved: reboot_device (customer agreed)"
+
+
+def test_decline_is_audited_too(fake_agent, orchestrator):
+    agent_url, calls = fake_agent(ask_consent=REBOOT)
+    client = orchestrator(agent_url)
+    session_id = new_session(client)
+    send(client, session_id, "no internet")
+
+    decide(client, session_id, "c-123", False)
+
+    assert calls[1]["json"]["consent"]["approved"] is False
+    assert calls[1]["json"]["message"] == "Declined: reboot_device"
+    assert client.get(f"/v1/sessions/{session_id}").json()["consent_log"][0]["approved"] is False
+
+
+def test_only_the_pending_request_can_be_decided(fake_agent, orchestrator):
+    agent_url, calls = fake_agent(ask_consent=REBOOT)
+    client = orchestrator(agent_url)
+    session_id = new_session(client)
+
+    assert decide(client, session_id, "c-123", True)[0].status_code == 409  # nothing pending yet
+    send(client, session_id, "no internet")
+    assert decide(client, session_id, "someone-elses", True)[0].status_code == 409
+    assert len(calls) == 1, "a refused decision never reaches the agent"
+    assert client.get(f"/v1/sessions/{session_id}").json()["consent_log"] == []
+
+
+def test_a_decision_can_only_be_used_once(fake_agent, orchestrator):
+    agent_url, calls = fake_agent(ask_consent=REBOOT)
+    client = orchestrator(agent_url)
+    session_id = new_session(client)
+    send(client, session_id, "no internet")
+
+    assert decide(client, session_id, "c-123", True)[0].status_code == 200
+    assert decide(client, session_id, "c-123", True)[0].status_code == 409
+    assert len(calls) == 2 and len(client.get(f"/v1/sessions/{session_id}").json()[
+        "consent_log"]) == 1
+
+
+def test_decision_while_a_turn_runs_is_rejected_and_unknown_session_is_404(
+        fake_agent, orchestrator):
+    agent_url, _ = fake_agent(ask_consent=REBOOT)
+    client = orchestrator(agent_url)
+    session_id = new_session(client)
+    send(client, session_id, "no internet")
+    client.app.state.sessions.get(session_id).start_turn()
+
+    assert decide(client, session_id, "c-123", True)[0].status_code == 409
+    assert decide(client, "nope", "c-123", True)[0].status_code == 404
+    bad = client.post(f"/v1/sessions/{session_id}/consent", json={"approved": True})
+    assert bad.status_code == 422

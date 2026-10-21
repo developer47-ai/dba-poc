@@ -51,7 +51,7 @@ Wait about two minutes after the reset, then check the PPP session.
 - actor: agent
 - tool: ticketing.create_swap_order
 - requires_consent: true
-- next: { created: S5 }
+- next: { created: S5, declined: S7 }
 Create a swap order for the recorded modem. Confirm the delivery address with the expert first.
 
 ### S5 — Inform the customer
@@ -65,3 +65,9 @@ the same way and returns the old modem with the enclosed label.
 - end: resolved
 Internet works after the factory reset. Help the customer reconnect devices with the sticker
 password.
+
+### S7 — No swap order
+- actor: expert
+- end: escalate
+- escalate_to: team lead
+The expert or customer declined the swap order. Document the checks done so far and inform the team lead; without a new modem the problem remains.

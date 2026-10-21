@@ -127,3 +127,18 @@ def test_summarize_keeps_results_short():
     assert summarize({"status": "up", "leds": {"wan": "green"}}) == "status=up"
     assert summarize([1, 2, 3]) == "3 item(s)"
     assert summarize("x" * 500).endswith("…") and len(summarize("x" * 500)) == 140
+
+
+def test_consent_decision_is_formatted_in_the_activity_log():
+    _, lines = play(
+        ev(EventType.STATUS_UPDATE, step="consent_resolved", approved=True,
+           action="reboot_device", sop_id="SOP-IH-001", step_id="S3"),
+        ev(EventType.STATUS_UPDATE, step="consent_resolved", approved=False,
+           action="reboot_device", sop_id="SOP-IH-001", step_id="S3"),
+        ev(EventType.STATUS_UPDATE, step="consent_rejected", reason="nothing pending"),
+    )
+    assert lines == [
+        "✅ Approved: `reboot_device` (SOP-IH-001 › S3)",
+        "🚫 Declined: `reboot_device` (SOP-IH-001 › S3)",
+        "⚠️ Decision not applied: nothing pending",
+    ]

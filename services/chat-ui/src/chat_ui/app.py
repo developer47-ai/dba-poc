@@ -23,6 +23,7 @@ client = get_client(ORCHESTRATOR_URL)
 state = st.session_state
 state.setdefault("session", None)
 state.setdefault("messages", [])
+state.setdefault("pending_consent", None)
 
 
 def customer_label(customer: dict) -> str:
@@ -70,6 +71,7 @@ with st.sidebar:
     if st.button("Start new session", type="primary", use_container_width=True):
         state.session = client.create_session(customer_id, expert_name)
         state.messages = []
+        state.pending_consent = None
     if st.button(
         "Reset customer's network", use_container_width=True,
         help="Restore the scenario's starting state (undo reboots and resets)",
@@ -98,21 +100,50 @@ for message in state.messages:
             render_activity(message.get("log", []))
         st.markdown(message["content"] or "_No answer._")
         if message["role"] == "assistant":
-            render_extras(message.get("citations", []), message.get("consent"))
+            asked = message.get("consent")
+            still_pending = bool(
+                asked and state.pending_consent
+                and state.pending_consent["consent_id"] == asked["consent_id"]
+            )
+            render_extras(message.get("citations", []), asked if still_pending else None)
         if message.get("error"):
             st.error(message["error"])
 
-if prompt := st.chat_input("Describe the customer's problem…"):
-    state.messages.append({"role": "user", "content": prompt})
+# Approve / Decline for the approval request the agent is waiting on (human-in-the-loop).
+decision: bool | None = None
+pending = state.pending_consent
+if pending:
+    approve_col, decline_col, _ = st.columns([1, 1, 4])
+    key = pending["consent_id"][:8]
+    if approve_col.button("✅ Approve", type="primary", key=f"approve-{key}"):
+        decision = True
+    if decline_col.button("🚫 Decline", key=f"decline-{key}"):
+        decision = False
+
+prompt = st.chat_input("Describe the customer's problem…")
+
+stream = None
+if decision is not None:
+    state.pending_consent = None
+    verdict = "✅ Approved" if decision else "🚫 Declined"
+    user_text = f"{verdict}: `{pending['action']}`"
+    stream = client.stream_consent(state.session["session_id"], pending["consent_id"], decision)
+elif prompt:
+    state.pending_consent = None
+    user_text = prompt
+    stream = client.stream_turn(state.session["session_id"], prompt)
+
+if stream is not None:
+    state.messages.append({"role": "user", "content": user_text})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(user_text)
 
     with st.chat_message("assistant"):
         status = st.status("Routing…", expanded=True)
         answer = st.empty()
         view = TurnView()
         try:
-            for event in client.stream_turn(state.session["session_id"], prompt):
+            for event in stream:
                 line = apply_event(view, event)
                 if line:
                     status.markdown(line)
@@ -133,3 +164,6 @@ if prompt := st.chat_input("Describe the customer's problem…"):
         "role": "assistant", "content": view.text, "log": view.log, "error": view.error,
         "citations": view.citations, "consent": view.consent,
     })
+    state.pending_consent = view.consent
+    if view.consent:
+        st.rerun()  # redraw so the Approve / Decline buttons appear under this answer

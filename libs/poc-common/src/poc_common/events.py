@@ -67,17 +67,6 @@ class ChatTurn(BaseModel):
     content: str
 
 
-class AgentRequest(BaseModel):
-    """What the orchestrator sends to a specialist agent for one conversation turn."""
-
-    customer_id: str = Field(min_length=1, max_length=64)
-    message: str = Field(min_length=1, max_length=4000)
-    session_id: str | None = None
-    history: list[ChatTurn] = Field(default_factory=list)
-    # The agent's own state from its last `agent_state` event in this session, if any.
-    state: dict[str, Any] | None = None
-
-
 class ConsentRequest(BaseModel):
     """Human-in-the-loop: an agent asks the support expert to approve a risky action."""
 
@@ -91,9 +80,24 @@ class ConsentRequest(BaseModel):
 
 
 class ConsentResponse(BaseModel):
-    consent_id: str
+    """The support expert's decision on one `ConsentRequest`."""
+
+    consent_id: str = Field(min_length=1, max_length=64)
     approved: bool
-    comment: str | None = None
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class AgentRequest(BaseModel):
+    """What the orchestrator sends to a specialist agent for one conversation turn."""
+
+    customer_id: str = Field(min_length=1, max_length=64)
+    message: str = Field(min_length=1, max_length=4000)
+    session_id: str | None = None
+    history: list[ChatTurn] = Field(default_factory=list)
+    # The agent's own state from its last `agent_state` event in this session, if any.
+    state: dict[str, Any] | None = None
+    # Set when this turn carries the expert's decision on the agent's pending approval request.
+    consent: ConsentResponse | None = None
 
 
 def consent_request_event(request: ConsentRequest, *, source: str, session_id: str | None) -> Event:

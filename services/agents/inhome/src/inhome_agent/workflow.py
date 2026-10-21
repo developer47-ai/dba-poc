@@ -52,11 +52,16 @@ NO_KNOWLEDGE_ANSWER = (
     "The approved NetCo knowledge base does not cover this question, so I cannot answer it "
     "reliably. Please check with your team lead."
 )
+REJECTED_ANSWER = (
+    "I cannot carry out that decision: no matching approval request is pending, so nothing was "
+    "changed. Please tell me what you would like to do."
+)
 
 
 class TurnState(TypedDict, total=False):
     message: str
     resume: dict | None      # SOP position this agent saved last turn
+    consent: dict | None     # the expert's decision on the pending approval, if this turn has one
     intent: str
     route: str               # "sop" | "knowledge" | "exploratory"
     step: dict | None        # current SOP step (from the knowledge server)
@@ -125,6 +130,57 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
                            reported_by="expert")
         return {"route": "sop", "step": moved["next_step"], "trail": [item], "procedures": 1}
 
+    async def act(state: TurnState) -> dict:
+        """Carry out (or skip) the action the expert just approved (or declined), then go on."""
+        saved, decision = state.get("resume") or {}, state["consent"]
+
+        def reject(reason: str) -> dict:
+            status("consent_rejected", consent_id=decision["consent_id"], reason=reason)
+            return {"route": "rejected", "answer": REJECTED_ANSWER, "sop_state": saved or None}
+
+        if saved.get("awaiting") != "consent" or saved.get("consent_id") != decision["consent_id"]:
+            return reject("no matching approval request is pending")
+        step = await knowledge("get_sop_step", doc_id=saved["doc_id"], step_id=saved["step_id"])
+        server, _, action = (step["tool"] or "").partition(".")
+        arguments = saved.get("arguments") or {}
+        if saved.get("action") != action or arguments.get("customer_id") != customer_id:
+            return reject("the saved request does not match the procedure step")
+
+        approved = decision["approved"]
+        status("consent_resolved", consent_id=decision["consent_id"], action=action,
+               approved=approved, comment=decision.get("comment"), sop_id=step["doc_id"],
+               step_id=step["step_id"])
+        result: Any = None
+        if approved:
+            outcome = next(o for o in step["outcomes"] if o != "declined")
+            emit(EventType.TOOL_CALL, tool=action, arguments=arguments, status="started",
+                 step_id=step["step_id"])
+            try:
+                result = await call_tool(tool_servers[server], action, arguments)
+            except McpToolError as exc:
+                result = f"Tool error: {exc}"
+            emit(EventType.TOOL_CALL, tool=action, status="completed", result=result,
+                 step_id=step["step_id"])
+            if isinstance(result, str) and result.startswith("Tool error:"):
+                item = _trail_item(step, tool=step["tool"], result=result, outcome="failed",
+                                   reason="the approved action failed")
+                return {"route": "sop", "trail": [item], "procedures": 1, "stop": {
+                    "kind": "blocked", "step": step,
+                    "detail": f"the approved action {action} failed: {result}"}}
+            reason = "approved by the expert"
+        else:
+            outcome, reason = "declined", "declined by the expert"
+        if decision.get("comment"):
+            reason += f" ({decision['comment']})"
+
+        status("sop_outcome", doc_id=step["doc_id"], step_id=step["step_id"], outcome=outcome,
+               reason=reason, source="expert")
+        moved = await knowledge("get_next_sop_step", doc_id=step["doc_id"],
+                                step_id=step["step_id"], outcome=outcome)
+        item = _trail_item(step, tool=step["tool"] if approved else None,
+                           result=result, outcome=outcome, reason=reason)
+        return {"route": "sop", "step": moved["next_step"], "trail": [item], "procedures": 1}
+
     async def intent(state: TurnState) -> dict:
         status("reasoning", purpose="intent")
         decision = await decide(intent_prompt(state["message"]), ["troubleshoot", "question"])
@@ -169,7 +225,12 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
             return {**update, "stop": {"kind": "end", "step": step}}
 
         if step["requires_consent"]:
-            action = (step["tool"] or "").partition(".")[2]
+            server, _, action = (step["tool"] or "").partition(".")
+            if server not in tool_servers:
+                return {**update, "stop": {
+                    "kind": "blocked", "step": step,
+                    "detail": f"{step['tool']} is not part of this demo, so the approved action "
+                              "cannot be carried out here"}}
             consent = ConsentRequest(
                 action=action, description=step["instruction"],
                 risk="high" if action in HIGH_RISK_ACTIONS else "medium",
@@ -177,8 +238,9 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
                 step_id=step["step_id"],
             )
             emit(EventType.CONSENT_REQUEST, **consent.model_dump())
-            return {**update, "stop": {"kind": "consent", "step": step,
-                                       "consent_id": consent.consent_id}}
+            return {**update, "stop": {
+                "kind": "consent", "step": step, "consent_id": consent.consent_id,
+                "action": action, "arguments": consent.arguments}}
 
         if step["actor"] != "agent":
             return {**update, "stop": {"kind": "ask", "step": step}}
@@ -224,7 +286,8 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
                      "step_id": step["step_id"],
                      "awaiting": "consent" if stop["kind"] == "consent" else "expert"}
             if stop["kind"] == "consent":
-                saved["consent_id"] = stop["consent_id"]
+                saved.update(consent_id=stop["consent_id"], action=stop["action"],
+                             arguments=stop["arguments"])
         status("reasoning", purpose="answer")
         prompt = answer_prompt(state["message"], state.get("trail") or [], stop)
         return {"answer": await stream_answer(ANSWER_SYSTEM, prompt), "sop_state": saved}
@@ -246,17 +309,25 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
     # ---- graph ------------------------------------------------------------------------------
 
     def start(state: TurnState) -> str:
+        if state.get("consent"):
+            return "act"
         saved = state.get("resume") or {}
         return "resume" if saved.get("awaiting") == "expert" else "intent"
 
     graph = StateGraph(TurnState)
     graph.add_node("resume", resume)
+    graph.add_node("act", act)
     graph.add_node("intent", intent)
     graph.add_node("select_sop", select_sop)
     graph.add_node("execute", execute)
     graph.add_node("compose", compose)
     graph.add_node("knowledge", knowledge_answer)
-    graph.add_conditional_edges(START, start, ["resume", "intent"])
+    graph.add_conditional_edges(START, start, ["act", "resume", "intent"])
+    graph.add_conditional_edges(
+        "act",
+        lambda s: "compose" if s.get("stop") else ("execute" if s.get("step") else END),
+        ["compose", "execute", END],
+    )
     graph.add_conditional_edges(
         "resume", lambda s: "execute" if s.get("step") else "intent", ["execute", "intent"])
     graph.add_conditional_edges(
@@ -283,7 +354,8 @@ async def run_workflow(
     stream_filter, message_id, streamed, hidden = ThinkingFilter(), None, False, 0
     final: TurnState = {}
     async for mode, payload in workflow.astream(
-        {"message": request.message, "resume": (request.state or {}).get("sop")},
+        {"message": request.message, "resume": (request.state or {}).get("sop"),
+         "consent": request.consent.model_dump() if request.consent else None},
         {"recursion_limit": 3 * MAX_STEPS_PER_TURN},
         stream_mode=["custom", "messages", "values"],
     ):

@@ -171,7 +171,7 @@ Built step by step; each step is one pull request and ends in something you can 
 ### Phase D — Full multi-agent platform → **M3: all scenarios**
 - [ ] **Step 9 — `installed-base-mcp` + `quickscan-service`**
 - [ ] **Step 10 — Access PON / P2P / Copper agents**, carrier routing and agent hand-over
-- [ ] **Step 11 — Human-in-the-loop**: consent, `scheduling-mcp`, `ticketing-mcp`, approval UI
+- [x] **Step 11 — Human-in-the-loop** (minimal): Approve / Decline buttons, audited decisions, the approved action really runs and the SOP continues; shown on two scenarios (C1002 reboot, C1003 Wi-Fi reset) plus the decline path. `scheduling-mcp` / `ticketing-mcp` are left for later.
 - [ ] **Step 12 — Memory**: Postgres checkpointer, session cache, customer memory
 
 ### Phase E — Operate & share → **v0.1.0 release**

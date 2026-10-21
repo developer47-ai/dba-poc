@@ -14,7 +14,8 @@ def test_valid_document_has_no_problems(valid_text):
 @pytest.mark.parametrize(
     "old,new,expected",
     [
-        ("- next: { done: S3 }", "- next: { done: S9 }", "points to unknown step S9"),
+        ("- next: { done: S3, declined: S3 }", "- next: { done: S9, declined: S3 }",
+         "points to unknown step S9"),
         ("- requires_consent: true\n", "", "must set requires_consent: true"),
         ("network-diagnostics.get_ppp_session", "network-diagnostics.hack", "unknown tool"),
         ("entry_step: S1", "entry_step: S7", "entry_step 'S7'"),
@@ -40,7 +41,9 @@ def test_unreachable_step_is_reported(valid_text):
 
 
 def test_loop_without_exit_is_reported(valid_text):
-    looping = valid_text.replace("- next: { done: S3 }", "- next: { done: S1 }").replace(
+    looping = valid_text.replace(
+        "- next: { done: S3, declined: S3 }", "- next: { done: S1, declined: S1 }"
+    ).replace(
         "- next: { up: S3, down: S2 }", "- next: { up: S2, down: S2 }"
     )
     found = problems(looping)
@@ -61,6 +64,19 @@ def test_reference_documents_must_not_have_steps(valid_text):
         "kind: procedure", "kind: reference"
     )
     assert "reference documents must not contain procedure steps" in problems(text)
+
+
+def test_approval_step_without_a_decline_path_is_reported(valid_text):
+    text = valid_text.replace("- next: { done: S3, declined: S3 }", "- next: { done: S3 }")
+    found = problems(text)
+    assert any("must have a 'declined' outcome" in p for p in found), found
+
+
+def test_approval_step_needs_exactly_one_approved_outcome(valid_text):
+    text = valid_text.replace(
+        "- next: { done: S3, declined: S3 }", "- next: { done: S3, other: S3, declined: S3 }"
+    )
+    assert any("exactly one outcome besides 'declined'" in p for p in problems(text))
 
 
 def test_the_whole_library_is_valid(library_dir):

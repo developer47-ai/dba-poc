@@ -8,10 +8,23 @@ Server-Sent Events (SSE).
 
 ```http
 POST /v1/sessions                       { "customer_id": "C1002", "expert_name": "Sam" }   -> 201
-GET  /v1/sessions/{session_id}          session summary and history
+GET  /v1/sessions/{session_id}          session summary: history, pending approval, consent audit log
 POST /v1/sessions/{session_id}/messages { "message": "Customer has no internet" }        -> text/event-stream
+POST /v1/sessions/{session_id}/consent  { "consent_id": "…", "approved": true, "comment": "…" } -> text/event-stream
 GET  /health
 ```
+
+## Human-in-the-loop approval
+
+When an SOP step would change the customer's service (reboot, Wi-Fi reset, factory reset), the
+agent emits a `consent_request` and **does not act**. The expert answers with `POST …/consent`:
+
+- only the **pending** request can be decided (`409` otherwise, also on a second click or while a
+  turn runs); the decision carries no arguments, so it cannot change *what* runs: the agent
+  executes the action and arguments it saved when it asked, after checking them again;
+- every decision is added to `consent_log` (who, when, action, SOP step, approved or declined);
+- the agent then continues the SOP: approved → run the action, re-check, finish; declined → the
+  step's `declined` path (for example escalation) and nothing is changed.
 
 ## Event stream of one turn
 

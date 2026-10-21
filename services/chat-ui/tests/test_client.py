@@ -37,3 +37,15 @@ def test_errors_are_readable(orchestrator_url):
         client.reset_customer("C9999")
     with pytest.raises(OrchestratorError, match="cannot reach"):
         OrchestratorClient("http://127.0.0.1:9").list_customers()
+
+
+def test_stream_consent_sends_the_decision_and_streams_the_follow_up(orchestrator_url):
+    client = OrchestratorClient(orchestrator_url)
+    session_id = client.create_session("C1002", "Sam")["session_id"]
+    list(client.stream_turn(session_id, "no internet"))  # the agent asks for approval (c1)
+
+    events = list(client.stream_consent(session_id, "c1", True, "customer agreed"))
+
+    assert events[-1].type is EventType.DONE
+    with pytest.raises(OrchestratorError, match="HTTP 409"):
+        list(client.stream_consent(session_id, "other", True))

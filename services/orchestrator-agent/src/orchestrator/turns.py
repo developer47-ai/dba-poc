@@ -6,7 +6,7 @@ import httpx
 
 from orchestrator.routing import Router
 from orchestrator.sessions import Session
-from poc_common.events import AgentRequest, ChatTurn, Event, EventType
+from poc_common.events import AgentRequest, ChatTurn, ConsentResponse, Event, EventType
 from poc_common.logging import CORRELATION_HEADER
 from poc_common.sse import iter_sse_events
 
@@ -43,6 +43,7 @@ async def run_turn(
     router: Router,
     client: httpx.AsyncClient,
     correlation_id: str,
+    consent: ConsentResponse | None = None,
 ) -> AsyncIterator[Event]:
     def event(type_: EventType, **data) -> Event:
         return Event(
@@ -64,6 +65,7 @@ async def run_turn(
         session_id=session.session_id,
         history=session.history,
         state=session.agent_state.get(decision.agent),
+        consent=consent,
     )
     answer: list[str] = []
     try:
@@ -74,8 +76,13 @@ async def run_turn(
                 continue
             if item.type is EventType.AGENT_STATE:
                 # Internal bookkeeping: keep it for the agent's next turn, do not show it.
-                session.agent_state[decision.agent] = item.data.get("state") or {}
+                state = item.data.get("state") or {}
+                session.agent_state[decision.agent] = state
+                if (state.get("sop") or {}).get("awaiting") != "consent":
+                    session.pending_consent = None
                 continue
+            if item.type is EventType.CONSENT_REQUEST:
+                session.pending_consent = {**item.data, "agent": decision.agent}
             item.session_id, item.correlation_id = session.session_id, correlation_id
             if item.type is EventType.AGENT_MESSAGE and item.data.get("final", True) \
                     and item.data.get("text"):

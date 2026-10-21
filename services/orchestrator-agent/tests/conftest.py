@@ -59,7 +59,8 @@ def fake_agent():
     """Start a minimal agent: url, calls = fake_agent(delay=..., status=..., state=...)."""
     with ExitStack() as stack:
 
-        def start(*, delay: float = 0.0, status: int = 200, state: dict | None = None):
+        def start(*, delay: float = 0.0, status: int = 200, state: dict | None = None,
+                  ask_consent: dict | None = None):
             calls: list[dict] = []
             app = FastAPI()
 
@@ -78,7 +79,17 @@ def fake_agent():
                     yield Event(type=EventType.AGENT_MESSAGE, source="inhome-agent",
                                 data={"message_id": "m1", "text": "late answer",
                                       "final": True}).to_sse()
-                    if state is not None:
+                    decided = calls[-1]["json"].get("consent") is not None
+                    if ask_consent is not None and not decided:
+                        yield Event(type=EventType.CONSENT_REQUEST, source="inhome-agent",
+                                    data=ask_consent).to_sse()
+                        yield Event(type=EventType.AGENT_STATE, source="inhome-agent", data={
+                            "state": {"sop": {"awaiting": "consent",
+                                              "consent_id": ask_consent["consent_id"]}}}).to_sse()
+                    elif ask_consent is not None:
+                        yield Event(type=EventType.AGENT_STATE, source="inhome-agent",
+                                    data={"state": {"sop": None}}).to_sse()
+                    elif state is not None:
                         yield Event(type=EventType.AGENT_STATE, source="inhome-agent",
                                     data={"state": state}).to_sse()
                     yield Event(type=EventType.DONE, source="inhome-agent").to_sse()

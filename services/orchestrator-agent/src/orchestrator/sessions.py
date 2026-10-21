@@ -24,6 +24,10 @@ class Session:
     active_agent: str | None = None
     # Resumable position per agent (e.g. the SOP step it waits at), from `agent_state` events.
     agent_state: dict[str, dict] = field(default_factory=dict)
+    # The approval request waiting for the expert's decision (from a `consent_request` event),
+    # and the audit trail of every decision taken in this session.
+    pending_consent: dict | None = None
+    consent_log: list[dict] = field(default_factory=list)
     busy_since: float | None = None
 
     @property
@@ -45,6 +49,8 @@ class Session:
             "created_at": self.created_at.isoformat(),
             "active_agent": self.active_agent,
             "agent_state": self.agent_state,
+            "pending_consent": self.pending_consent,
+            "consent_log": self.consent_log,
             "busy": self.busy,
             "history": [t.model_dump() for t in self.history],
         }
