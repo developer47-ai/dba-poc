@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from inhome_agent import create_app
-from inhome_agent.workflow import REJECTED_ANSWER
 from poc_common.events import EventType, parse_sse
 from poc_common.fake_llm import ScriptedChatModel, tool_call_message
+from sop_agent.workflow import REJECTED_ANSWER
 
 STUCK = "The customer has no internet and the modem's internet light is orange"
 WIFI = "The customer's laptop cannot connect to the wifi"
@@ -43,7 +43,8 @@ def tool_calls(events):
 
 
 def saved_state(events):
-    return next(e.data["state"] for e in events if e.type is EventType.AGENT_STATE)
+    state = next(e.data["state"] for e in events if e.type is EventType.AGENT_STATE)
+    return {k: v for k, v in state.items() if not (k == "handover" and v is None)}
 
 
 def ask_for_approval(config, script, *, customer_id, message):

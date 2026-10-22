@@ -1,4 +1,4 @@
-"""HTTP + SSE service around the In-Home agent."""
+"""HTTP + SSE service around a SOP-guided specialist agent."""
 
 import json
 import logging
@@ -12,14 +12,15 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
-from inhome_agent.graph import build_graph
-from inhome_agent.prompts import EXPLORATORY_NOTE, SYSTEM_PROMPT
-from inhome_agent.tools import load_read_only_tools
-from inhome_agent.workflow import SOURCE, THINKING_REPORT_EVERY, TurnResult, run_workflow
 from poc_common.config import Config, get_config
 from poc_common.events import AgentRequest, ChatTurn, Event, EventType
 from poc_common.llm import ThinkingFilter, apply_thinking_mode, get_chat_model, strip_thinking
 from poc_common.logging import set_correlation_id, set_session_id, setup_logging
+from sop_agent.graph import build_graph
+from sop_agent.prompts import EXPLORATORY_NOTE, exploratory_prompt
+from sop_agent.spec import AgentSpec
+from sop_agent.tools import load_read_only_tools
+from sop_agent.workflow import THINKING_REPORT_EVERY, TurnResult, run_workflow
 
 logger = logging.getLogger(__name__)
 MAX_GRAPH_STEPS = 14
@@ -32,7 +33,7 @@ def _to_message(turn: ChatTurn):
 
 
 async def diagnose(
-    request: DiagnoseRequest, config: Config, llm: BaseChatModel
+    request: DiagnoseRequest, config: Config, llm: BaseChatModel, spec: AgentSpec
 ) -> AsyncIterator[Event]:
     """Handle one turn and stream what happens, token by token.
 
@@ -45,17 +46,17 @@ async def diagnose(
     """
 
     def event(type_: EventType, **data) -> Event:
-        return Event(type=type_, source=SOURCE, session_id=request.session_id, data=data)
+        return Event(type=type_, source=spec.source, session_id=request.session_id, data=data)
 
     try:
         yield event(EventType.STATUS_UPDATE, step="diagnosis_started")
         result = TurnResult()
-        async for item in run_workflow(request, config, llm, result):
+        async for item in run_workflow(request, config, llm, spec, result):
             yield item
         if result.route == "exploratory":
-            async for item in stream_exploratory(request, config, llm, event):
+            async for item in stream_exploratory(request, config, llm, spec, event):
                 yield item
-            yield event(EventType.AGENT_STATE, state={"sop": None})
+            yield event(EventType.AGENT_STATE, state={"sop": None, "handover": None})
     except GraphRecursionError:
         yield event(EventType.ERROR, message="The agent did not reach an answer in time.")
     except Exception as exc:
@@ -65,7 +66,7 @@ async def diagnose(
 
 
 async def stream_exploratory(
-    request: DiagnoseRequest, config: Config, llm: BaseChatModel, event
+    request: DiagnoseRequest, config: Config, llm: BaseChatModel, spec: AgentSpec, event
 ) -> AsyncIterator[Event]:
     """Free tool choice over the read-only diagnostic tools, when no SOP matches."""
 
@@ -73,7 +74,7 @@ async def stream_exploratory(
         return event(EventType.STATUS_UPDATE, step="reasoning", round=round_)
 
     tools = await load_read_only_tools(config.diagnostics_mcp_url, request.customer_id)
-    prompt = apply_thinking_mode(f"{SYSTEM_PROMPT}\n{EXPLORATORY_NOTE}", config)
+    prompt = apply_thinking_mode(f"{exploratory_prompt(spec)}\n{EXPLORATORY_NOTE}", config)
     graph = build_graph(llm, tools, prompt)
     messages = [*map(_to_message, request.history), HumanMessage(request.message)]
     yield event(EventType.STATUS_UPDATE, step="exploratory_started", tools=len(tools))
@@ -144,13 +145,15 @@ def _parse(content):
         return content
 
 
-def create_app(config: Config | None = None, llm: BaseChatModel | None = None) -> FastAPI:
+def create_app(
+    spec: AgentSpec, config: Config | None = None, llm: BaseChatModel | None = None
+) -> FastAPI:
     config = config or get_config()
-    app = FastAPI(title="In-Home Agent", version="0.1.0")
+    app = FastAPI(title=spec.title, version="0.1.0")
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "agent": SOURCE}
+        return {"status": "ok", "agent": spec.source}
 
     @app.post("/v1/diagnose")
     async def diagnose_endpoint(
@@ -162,7 +165,7 @@ def create_app(config: Config | None = None, llm: BaseChatModel | None = None) -
         model = llm or get_chat_model(config)
 
         async def stream() -> AsyncIterator[str]:
-            async for item in diagnose(request, config, model):
+            async for item in diagnose(request, config, model, spec):
                 item.correlation_id = x_correlation_id
                 yield item.to_sse()
 
@@ -171,12 +174,12 @@ def create_app(config: Config | None = None, llm: BaseChatModel | None = None) -
     return app
 
 
-def main() -> None:
+def main(spec: AgentSpec) -> None:
     import uvicorn
 
     config = get_config()
-    setup_logging(SOURCE, config.log_level, config.log_json)
+    setup_logging(spec.source, config.log_level, config.log_json)
     uvicorn.run(
-        create_app(config), host=os.getenv("INHOME_HOST", "0.0.0.0"),
-        port=int(os.getenv("INHOME_PORT", "8201")),
+        create_app(spec, config), host=os.getenv("AGENT_HOST", "0.0.0.0"),
+        port=int(os.getenv(spec.port_env, str(spec.default_port))),
     )

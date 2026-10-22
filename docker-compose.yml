@@ -14,7 +14,9 @@ x-service-env: &service-env
   NETWORK_SIMULATOR_URL: http://network-simulator:8300
   DIAGNOSTICS_MCP_URL: http://network-diagnostics-mcp:8101/mcp
   KNOWLEDGE_MCP_URL: http://knowledge-mcp:8105/mcp
+  SCHEDULING_MCP_URL: http://scheduling-mcp:8103/mcp
   INHOME_AGENT_URL: http://inhome-agent:8201
+  ACCESS_PON_AGENT_URL: http://access-pon-agent:8202
   ORCHESTRATOR_URL: http://orchestrator:8000
   DATABASE_URL: postgresql://${POSTGRES_USER:-dba}:${POSTGRES_PASSWORD:-dba_local_pw}@postgres:5432/${POSTGRES_DB:-dba}
   KNOWLEDGE_DIR: /app/knowledge
@@ -59,6 +61,7 @@ services:
     environment: *service-env
     depends_on:
       inhome-agent: { condition: service_healthy }
+      access-pon-agent: { condition: service_healthy }
       network-simulator: { condition: service_healthy }
     healthcheck:
       <<: *health
@@ -76,12 +79,31 @@ services:
     depends_on:
       network-diagnostics-mcp: { condition: service_healthy }
       knowledge-mcp: { condition: service_healthy }
+      scheduling-mcp: { condition: service_healthy }
       ollama: { condition: service_healthy }
       ollama-init: { condition: service_completed_successfully }
     healthcheck:
       <<: *health
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8201/health', timeout=4)"]
 
+  access-pon-agent:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: access-pon-agent, MODULE: access_pon_agent }
+    image: dba-poc/access-pon-agent:local
+    container_name: dba-access-pon-agent
+    restart: unless-stopped
+    environment: *service-env
+    depends_on:
+      network-diagnostics-mcp: { condition: service_healthy }
+      knowledge-mcp: { condition: service_healthy }
+      scheduling-mcp: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+      ollama-init: { condition: service_completed_successfully }
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8202/health', timeout=4)"]
   network-diagnostics-mcp:
     build:
       context: .
@@ -97,6 +119,18 @@ services:
       <<: *health
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8101/health', timeout=4)"]
 
+  scheduling-mcp:
+    build:
+      context: .
+      dockerfile: infra/docker/service.Dockerfile
+      args: { PACKAGE: scheduling-mcp, MODULE: scheduling_mcp }
+    image: dba-poc/scheduling-mcp:local
+    container_name: dba-scheduling-mcp
+    restart: unless-stopped
+    environment: *service-env
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8103/health', timeout=4)"]
   network-simulator:
     build:
       context: .

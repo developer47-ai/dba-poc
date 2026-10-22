@@ -1,9 +1,12 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from inhome_agent import build_graph
-from inhome_agent.prompts import SYSTEM_PROMPT
-from inhome_agent.tools import load_read_only_tools
+from inhome_agent import SPEC
 from poc_common.fake_llm import ScriptedChatModel, tool_call_message
+from sop_agent import build_graph
+from sop_agent.prompts import exploratory_prompt
+from sop_agent.tools import load_read_only_tools
+
+SYSTEM_PROMPT = exploratory_prompt(SPEC)
 
 
 async def test_agent_calls_tools_then_answers_from_the_results(mcp_url):
@@ -14,7 +17,7 @@ async def test_agent_calls_tools_then_answers_from_the_results(mcp_url):
             AIMessage("Findings: PPP down, internet light orange. Diagnosis: stuck modem."),
         ]
     )
-    graph = build_graph(llm, await load_read_only_tools(mcp_url, "C1002"))
+    graph = build_graph(llm, await load_read_only_tools(mcp_url, "C1002"), SYSTEM_PROMPT)
 
     result = await graph.ainvoke({"messages": [HumanMessage("Customer has no internet")]})
 
@@ -30,7 +33,7 @@ async def test_model_always_sees_the_system_prompt_and_prior_tool_results(mcp_ur
     llm = ScriptedChatModel(
         script=[tool_call_message("get_ppp_session"), AIMessage("done")]
     )
-    graph = build_graph(llm, await load_read_only_tools(mcp_url, "C1006"))
+    graph = build_graph(llm, await load_read_only_tools(mcp_url, "C1006"), SYSTEM_PROMPT)
 
     await graph.ainvoke({"messages": [HumanMessage("check the line")]})
 
@@ -41,7 +44,7 @@ async def test_model_always_sees_the_system_prompt_and_prior_tool_results(mcp_ur
 
 async def test_unknown_tool_name_does_not_crash_the_graph(mcp_url):
     llm = ScriptedChatModel(script=[tool_call_message("reboot_device"), AIMessage("cannot reboot")])
-    graph = build_graph(llm, await load_read_only_tools(mcp_url, "C1002"))
+    graph = build_graph(llm, await load_read_only_tools(mcp_url, "C1002"), SYSTEM_PROMPT)
 
     result = await graph.ainvoke({"messages": [HumanMessage("please reboot")]})
 

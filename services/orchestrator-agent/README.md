@@ -26,6 +26,16 @@ agent emits a `consent_request` and **does not act**. The expert answers with `P
 - the agent then continues the SOP: approved → run the action, re-check, finish; declined → the
   step's `declined` path (for example escalation) and nothing is changed.
 
+## Agent hand-over
+
+When a procedure ends with `end: handover` the agent reports it (an internal `handover` note in
+its saved state). The orchestrator then picks the next agent: directly when the SOP names one
+(`handover_to: inhome | access-pon`), or by the customer's carrier technology for
+`access-network` (GPON / XGS-PON → `access-pon-agent`; the installed base is read from the
+simulator in this demo). It emits `agent_handoff` (with the findings so far), calls the new agent
+with that context and keeps it as the active agent for follow-ups. At most two hops per turn; if
+no agent exists for the technology a `status_update` `handover_unavailable` explains why.
+Approvals go to the agent that asked for them.
 ## Event stream of one turn
 
 | Event | From | Meaning |

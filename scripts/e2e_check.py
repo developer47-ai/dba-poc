@@ -5,8 +5,11 @@
    embeddings + pgvector hybrid search).
 2. Conversation: resets scenario customer C1002 (stuck modem), opens a session and runs one
    troubleshooting turn through orchestrator -> In-Home agent -> MCP -> simulator with the real
-   local LLM. Passes when the answer streams token by token, at least one diagnostic tool ran and
-   no error occurred.
+   local LLM. Passes when the answer streams token by token, a diagnostic tool ran, the expert's
+   approval is requested and the approved action runs.
+3. Hand-over: customer C1001 (fiber, no light). The In-Home agent finds the problem is outside the
+   home and hands over to the Access-PON agent, which follows SOP-PON-001 and asks approval to
+   book an engineer; the approved booking must be confirmed by the scheduling MCP.
 
     python scripts/e2e_check.py   # ORCHESTRATOR_URL / CHAT_UI_URL / KNOWLEDGE_URL override defaults
 """
@@ -216,6 +219,95 @@ def decide(session_id: str, consent_id: str, approve: bool) -> tuple[list[str], 
                       "decision_tools": calls, "followed": selected}
 
 
+def run_handover(attempt: int) -> tuple[list[str], dict]:
+    """Multi-agent: In-Home agent -> hand-over -> Access-PON agent -> approved booking."""
+    customer = "C1001"
+    request_json("POST", f"{ORCHESTRATOR}/v1/demo/customers/{customer}/reset")
+    session = request_json("POST", f"{ORCHESTRATOR}/v1/sessions",
+                           {"customer_id": customer, "expert_name": "e2e"})
+    session_id = session["session_id"]
+    print(f"\n[handover {attempt}] session {session_id[:8]} · customer {customer}")
+    print(f"[expert] {MESSAGE}")
+
+    agents, procedures, tools, errors, consent = [], [], [], [], None
+    finals: list[str] = []
+    for kind, data, at in stream_post(f"/v1/sessions/{session_id}/messages", {"message": MESSAGE}):
+        if kind == "agent_handoff":
+            agents.append(data.get("to_agent"))
+            print(f"\n  [{at:6.1f}s] handoff {data.get('from_agent')} -> {data.get('to_agent')}"
+                  f" ({data.get('reason')})", flush=True)
+        elif kind == "status_update" and data.get("step") == "sop_selected":
+            procedures.append(data["doc_id"])
+            print(f"  [{at:6.1f}s] SOP   {data['doc_id']}", flush=True)
+        elif kind == "status_update" and data.get("step") == "handover_unavailable":
+            errors.append(f"hand-over not possible: {data.get('reason')}")
+        elif kind == "tool_call" and data.get("status") == "started":
+            tools.append(data["tool"])
+            print(f"  [{at:6.1f}s] tool  {data['tool']}", flush=True)
+        elif kind == "consent_request":
+            consent = data
+            print(f"  [{at:6.1f}s] APPROVAL NEEDED {data.get('action')} {data.get('arguments')}",
+                  flush=True)
+        elif kind == "agent_message" and data.get("final"):
+            finals.append(data.get("text", ""))
+        elif kind == "error":
+            errors.append(data.get("message", ""))
+
+    problems = [f"error: {e}" for e in errors]
+    if agents != ["inhome-agent", "access-pon-agent"]:
+        problems.append(f"expected hand-over inhome-agent -> access-pon-agent, got {agents}")
+    if procedures != ["SOP-IH-001", "SOP-PON-001"]:
+        problems.append(f"expected SOP-IH-001 then SOP-PON-001, followed {procedures}")
+    if "search_appointment_slots" not in tools:
+        problems.append("the Access-PON agent did not search appointment slots")
+    if not consent or consent.get("action") != "book_appointment":
+        problems.append(f"expected an approval request for book_appointment, got {consent}")
+    metrics = {"agents": agents, "procedures": procedures, "tools": tools,
+               "answers": finals, "booked": "–"}
+    if problems:
+        return problems, metrics
+
+    print("\n[expert] APPROVE the booking")
+    body = {"consent_id": consent["consent_id"], "approved": True, "comment": "e2e check"}
+    booking = None
+    for kind, data, at in stream_post(f"/v1/sessions/{session_id}/consent", body):
+        if kind == "tool_call" and data.get("status") == "completed" \
+                and data["tool"] == "book_appointment":
+            booking = data.get("result")
+            print(f"  [{at:6.1f}s] tool  book_appointment -> {json.dumps(booking)[:140]}",
+                  flush=True)
+        elif kind == "agent_message" and data.get("final"):
+            finals.append(data.get("text", ""))
+        elif kind == "error":
+            problems.append(f"error after the approval: {data.get('message')}")
+    if not isinstance(booking, dict) or booking.get("status") != "confirmed":
+        problems.append(f"the approved booking was not confirmed: {booking}")
+    else:
+        metrics["booked"] = f"{booking['booking_id']} {booking['slot']['date']} " \
+                            f"{booking['slot']['window']}"
+    state = session_state(session_id)
+    if len(state.get("consent_log", [])) != 1 or state.get("pending_consent"):
+        problems.append("the booking approval was not audited correctly")
+    if not problems:
+        print(f"[result] agents={agents} sops={procedures} booked={metrics['booked']}")
+    return problems, metrics
+
+
+def write_handover_summary(metrics: dict, passed: bool) -> None:
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    answers = " / ".join(a.replace("\n", " ")[:300] for a in metrics.get("answers", []))
+    with open(path, "a", encoding="utf-8") as summary:
+        summary.write(
+            f"### Multi-agent hand-over {'✅' if passed else '❌'}\n\n"
+            f"Customer `C1001` · agents: {' → '.join(['inhome-agent', *metrics['agents']])}"
+            f" · SOPs: {' → '.join(metrics['procedures']) or '–'}\n\n"
+            f"Tools: {', '.join(metrics['tools']) or '–'} · **booking after approval:** "
+            f"{metrics['booked']}\n\n> {answers}\n\n"
+        )
+
+
 def session_state(session_id: str) -> dict:
     return request_json("GET", f"{ORCHESTRATOR}/v1/sessions/{session_id}")
 
@@ -313,20 +405,25 @@ def main() -> None:
 
     # Small local models are not fully deterministic, so each scenario gets one retry.
     results: list[dict] = []
-    for approve in (True, False):
+    # The decline path is covered by the agent and orchestrator tests; here every minute counts.
+    scenarios = [
+        ("approve", run_attempt, write_summary),
+        ("hand-over", run_handover, write_handover_summary),
+    ]
+    for name, run, summarize in scenarios:
         metrics: dict = {}
         for attempt in range(1, ATTEMPTS + 1):
-            problems, metrics = run_attempt(attempt, approve)
+            problems, metrics = run(attempt)
             if not problems:
                 break
             print(f"[attempt {attempt}] problems: {'; '.join(problems)}")
         else:
-            write_summary(metrics, passed=False)
-            sys.exit(f"\nE2E FAILED ({'approve' if approve else 'decline'} scenario)")
-        write_summary(metrics, passed=True)
+            summarize(metrics, passed=False)
+            sys.exit(f"\nE2E FAILED ({name} scenario)")
+        summarize(metrics, passed=True)
         results.append(metrics)
-    print("\nE2E PASSED - knowledge search, SOP-guided troubleshooting and the approve / decline "
-          "flow work end to end.")
+    print("\nE2E PASSED - knowledge search, SOP-guided troubleshooting, approval and the "
+          "multi-agent hand-over work end to end.")
 
 
 if __name__ == "__main__":

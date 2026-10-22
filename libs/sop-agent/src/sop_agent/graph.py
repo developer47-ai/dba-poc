@@ -1,4 +1,4 @@
-"""The In-Home agent as a LangGraph: model node -> tool node -> model node, until it answers."""
+"""A specialist agent as a LangGraph: model node -> tool node -> model node, until it answers."""
 
 from typing import Annotated, TypedDict
 
@@ -9,14 +9,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from inhome_agent.prompts import SYSTEM_PROMPT
-
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
 
-def build_graph(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str = SYSTEM_PROMPT):
+def build_graph(llm: BaseChatModel, tools: list[BaseTool], system_prompt: str):
     model = llm.bind_tools(tools)
 
     async def call_model(state: AgentState) -> dict:

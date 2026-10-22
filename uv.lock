@@ -12,6 +12,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "access-pon-agent",
     "chat-ui",
     "dba-poc",
     "inhome-agent",
@@ -21,7 +22,24 @@ members = [
     "network-simulator",
     "orchestrator-agent",
     "poc-common",
+    "scheduling-mcp",
+    "sop-agent",
     "sop-kit",
+]
+
+[[package]]
+name = "access-pon-agent"
+version = "0.1.0"
+source = { editable = "services/agents/access-pon" }
+dependencies = [
+    { name = "poc-common", extra = ["llm"] },
+    { name = "sop-agent" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "poc-common", extras = ["llm"], editable = "libs/poc-common" },
+    { name = "sop-agent", editable = "libs/sop-agent" },
 ]
 
 [[package]]
@@ -408,6 +426,7 @@ name = "dba-poc"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "access-pon-agent" },
     { name = "chat-ui" },
     { name = "inhome-agent" },
     { name = "knowledge-base" },
@@ -416,6 +435,8 @@ dependencies = [
     { name = "network-simulator" },
     { name = "orchestrator-agent" },
     { name = "poc-common" },
+    { name = "scheduling-mcp" },
+    { name = "sop-agent" },
     { name = "sop-kit" },
 ]
 
@@ -428,6 +449,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "access-pon-agent", editable = "services/agents/access-pon" },
     { name = "chat-ui", editable = "services/chat-ui" },
     { name = "inhome-agent", editable = "services/agents/inhome" },
     { name = "knowledge-base", editable = "libs/knowledge-base" },
@@ -436,6 +458,8 @@ requires-dist = [
     { name = "network-simulator", editable = "services/network-simulator" },
     { name = "orchestrator-agent", editable = "services/orchestrator-agent" },
     { name = "poc-common", editable = "libs/poc-common" },
+    { name = "scheduling-mcp", editable = "services/mcp/scheduling" },
+    { name = "sop-agent", editable = "libs/sop-agent" },
     { name = "sop-kit", editable = "libs/sop-kit" },
 ]
 
@@ -571,20 +595,14 @@ name = "inhome-agent"
 version = "0.1.0"
 source = { editable = "services/agents/inhome" }
 dependencies = [
-    { name = "fastapi" },
-    { name = "langchain-core" },
-    { name = "langgraph" },
     { name = "poc-common", extra = ["llm"] },
-    { name = "uvicorn" },
+    { name = "sop-agent" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "langchain-core", specifier = ">=0.3" },
-    { name = "langgraph", specifier = ">=0.6" },
     { name = "poc-common", extras = ["llm"], editable = "libs/poc-common" },
-    { name = "uvicorn", specifier = ">=0.30" },
+    { name = "sop-agent", editable = "libs/sop-agent" },
 ]
 
 [[package]]
@@ -2256,6 +2274,21 @@ wheels = [
 ]
 
 [[package]]
+name = "scheduling-mcp"
+version = "0.1.0"
+source = { editable = "services/mcp/scheduling" }
+dependencies = [
+    { name = "mcp" },
+    { name = "poc-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.9,<2" },
+    { name = "poc-common", editable = "libs/poc-common" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2271,6 +2304,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "sop-agent"
+version = "0.1.0"
+source = { editable = "libs/sop-agent" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "poc-common", extra = ["llm"] },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "langchain-core", specifier = ">=0.3" },
+    { name = "langgraph", specifier = ">=0.6" },
+    { name = "poc-common", extras = ["llm"], editable = "libs/poc-common" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [[package]]

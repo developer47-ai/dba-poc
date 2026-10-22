@@ -80,6 +80,16 @@ def create_app(
             raise HTTPException(response.status_code, response.json().get("detail", "error"))
         return response.json()
 
+    async def carrier_tech(customer_id: str) -> str | None:
+        """Fiber/copper technology of the customer (the installed base; here: the simulator)."""
+        try:
+            base = await simulator("GET", f"/customers/{customer_id}/installed-base")
+        except HTTPException:
+            return None
+        return base.get("carrier_tech_type")
+
+    app.state.router.carrier_tech = carrier_tech
+
     @app.get("/v1/demo/customers")
     async def demo_customers() -> list[dict]:
         return await simulator("GET", "/customers")

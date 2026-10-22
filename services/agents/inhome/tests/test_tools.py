@@ -1,6 +1,6 @@
 import json
 
-from inhome_agent.tools import load_read_only_tools
+from sop_agent.tools import load_read_only_tools
 
 READ_TOOLS = {
     "get_ppp_session", "get_ppp_history", "get_ont_status", "get_access_port_status",

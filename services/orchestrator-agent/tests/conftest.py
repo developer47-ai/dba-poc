@@ -114,3 +114,20 @@ def orchestrator():
             return stack.enter_context(TestClient(app))
 
         yield start
+
+
+@pytest.fixture
+def orchestrator_with_agents():
+    """Orchestrator wired to several agents: client = start({name: url}, carrier_tech="GPON")."""
+    with ExitStack() as stack:
+
+        def start(agents: dict[str, str], carrier_tech: str | None = None) -> TestClient:
+            app = create_app(Config(), registry=AgentRegistry(agents))
+
+            async def lookup(customer_id: str) -> str | None:
+                return carrier_tech
+
+            app.state.router.carrier_tech = lookup
+            return stack.enter_context(TestClient(app))
+
+        yield start

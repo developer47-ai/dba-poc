@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "Local multi-agent connectivity troubleshooting POC (workspace root)"
 requires-python = ">=3.12"
 dependencies = [
-  "poc-common", "sop-kit", "knowledge-base", "network-simulator", "network-diagnostics-mcp",
-  "knowledge-mcp", "inhome-agent", "orchestrator-agent", "chat-ui",
+  "poc-common", "sop-kit", "knowledge-base", "sop-agent", "network-simulator",
+  "network-diagnostics-mcp", "knowledge-mcp", "scheduling-mcp", "inhome-agent", "access-pon-agent",
+  "orchestrator-agent", "chat-ui",
 ]
 
 [tool.uv]
@@ -24,7 +25,10 @@ knowledge-base = { workspace = true }
 network-simulator = { workspace = true }
 network-diagnostics-mcp = { workspace = true }
 knowledge-mcp = { workspace = true }
+sop-agent = { workspace = true }
+scheduling-mcp = { workspace = true }
 inhome-agent = { workspace = true }
+access-pon-agent = { workspace = true }
 orchestrator-agent = { workspace = true }
 chat-ui = { workspace = true }
 
@@ -54,5 +58,6 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.isort]
 known-first-party = [
   "poc_common", "sop_kit", "knowledge_base", "network_simulator", "network_diagnostics_mcp",
-  "knowledge_mcp", "inhome_agent", "orchestrator", "chat_ui",
+  "knowledge_mcp", "scheduling_mcp", "sop_agent", "inhome_agent", "access_pon_agent",
+  "orchestrator", "chat_ui",
 ]

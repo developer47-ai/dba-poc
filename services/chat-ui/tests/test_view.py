@@ -142,3 +142,36 @@ def test_consent_decision_is_formatted_in_the_activity_log():
         "🚫 Declined: `reboot_device` (SOP-IH-001 › S3)",
         "⚠️ Decision not applied: nothing pending",
     ]
+
+def test_handover_stacks_the_answers_of_both_agents():
+    view, lines = play(
+        ev(EventType.STATUS_UPDATE, "orchestrator", step="routing", agent="inhome-agent"),
+        ev(EventType.AGENT_MESSAGE, message_id="a", text="Home is fine; the fault is outside.",
+           final=True),
+        ev(EventType.AGENT_HANDOFF, "orchestrator", from_agent="inhome-agent",
+           to_agent="access-pon-agent", context="ONT shows LOS"),
+        ev(EventType.AGENT_MESSAGE_DELTA, "access-pon-agent", message_id="b", text="OLT port "),
+        ev(EventType.AGENT_MESSAGE, "access-pon-agent", message_id="b", text="OLT port down.",
+           final=True),
+        ev(EventType.DONE, "orchestrator"),
+    )
+    assert view.agent == "access-pon-agent" and view.text == "OLT port down."
+    assert view.earlier == [("inhome-agent", "Home is fine; the fault is outside.")]
+    assert view.full_text == (
+        "**inhome-agent**\n\nHome is fine; the fault is outside."
+        "\n\n**access-pon-agent**\n\nOLT port down."
+    )
+    assert "🔀 Hand-over: inhome-agent → **access-pon-agent** — ONT shows LOS" in lines
+    assert view.summary_label.startswith("inhome-agent → access-pon-agent")
+
+
+def test_single_agent_answer_is_not_labelled_and_missing_agent_is_reported():
+    view, lines = play(
+        ev(EventType.AGENT_MESSAGE, message_id="a", text="All good.", final=True),
+        ev(EventType.STATUS_UPDATE, "orchestrator", step="handover_unavailable",
+           reason="no access agent in this demo for technology EOF"),
+    )
+    assert view.full_text == "All good."
+    assert lines == [
+        "⚠️ No agent for this hand-over: no access agent in this demo for technology EOF"
+    ]

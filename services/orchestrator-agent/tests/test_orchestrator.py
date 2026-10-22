@@ -1,6 +1,7 @@
 import time
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
@@ -308,3 +309,119 @@ def test_decision_while_a_turn_runs_is_rejected_and_unknown_session_is_404(
     assert decide(client, "nope", "c-123", True)[0].status_code == 404
     bad = client.post(f"/v1/sessions/{session_id}/consent", json={"approved": True})
     assert bad.status_code == 422
+
+HANDOVER = {
+    "to": "access-network",
+    "from": "SOP-IH-001 v1.0 › S9",
+    "context": "ONT shows LOS, home network healthy",
+}
+
+
+def test_handover_goes_to_the_agent_for_the_customers_technology(
+    fake_agent, orchestrator_with_agents
+):
+    inhome_url, inhome_calls = fake_agent(state={"sop": None, "handover": HANDOVER})
+    pon_url, pon_calls = fake_agent()
+    client = orchestrator_with_agents(
+        {"inhome-agent": inhome_url, "access-pon-agent": pon_url}, carrier_tech="GPON"
+    )
+    session_id = new_session(client, "C1001")
+
+    _, events = send(client, session_id, "no internet at all")
+
+    handoffs = [e.data for e in events if e.type is EventType.AGENT_HANDOFF]
+    assert [(h["from_agent"], h["to_agent"]) for h in handoffs] == [
+        ("orchestrator", "inhome-agent"), ("inhome-agent", "access-pon-agent"),
+    ]
+    assert handoffs[1]["context"] == HANDOVER["context"]
+    assert "GPON" in handoffs[1]["reason"]
+    assert events[-1].type is EventType.DONE
+    assert len(inhome_calls) == 1 and len(pon_calls) == 1
+    passed_on = pon_calls[0]["json"]["message"]
+    assert HANDOVER["context"] in passed_on and "no internet at all" in passed_on
+    assert pon_calls[0]["json"]["state"] is None
+    # The hand-over note is internal: it is not stored as the In-Home agent's saved state.
+    summary = client.get(f"/v1/sessions/{session_id}").json()
+    assert summary["active_agent"] == "access-pon-agent"
+    assert [t["role"] for t in summary["history"]] == ["user", "assistant"]
+    assert summary["history"][1]["content"].startswith("[inhome-agent] late answer")
+    assert "[access-pon-agent] late answer" in summary["history"][1]["content"]
+
+
+def test_follow_up_after_a_handover_goes_straight_to_the_new_agent(
+    fake_agent, orchestrator_with_agents
+):
+    inhome_url, inhome_calls = fake_agent(state={"sop": None, "handover": HANDOVER})
+    pon_url, pon_calls = fake_agent(state={"sop": {"doc_id": "SOP-PON-001", "awaiting": "expert"}})
+    client = orchestrator_with_agents(
+        {"inhome-agent": inhome_url, "access-pon-agent": pon_url}, carrier_tech="XGSPON"
+    )
+    session_id = new_session(client, "C1001")
+
+    send(client, session_id, "no internet at all")
+    _, second = send(client, session_id, "yes, the customer agrees")
+
+    assert len(inhome_calls) == 1 and len(pon_calls) == 2
+    assert pon_calls[1]["json"]["state"]["sop"]["doc_id"] == "SOP-PON-001"
+    assert pon_calls[1]["json"]["message"] == "yes, the customer agrees"
+    assert second[0].data["agent"] == "access-pon-agent"
+
+
+@pytest.mark.parametrize("tech", ["EOF", "COPPER", None])
+def test_handover_without_an_agent_for_the_technology_is_reported(
+    fake_agent, orchestrator_with_agents, tech
+):
+    inhome_url, _ = fake_agent(state={"sop": None, "handover": HANDOVER})
+    pon_url, pon_calls = fake_agent()
+    client = orchestrator_with_agents(
+        {"inhome-agent": inhome_url, "access-pon-agent": pon_url}, carrier_tech=tech
+    )
+    session_id = new_session(client, "C1005")
+
+    _, events = send(client, session_id, "no internet")
+
+    missing = [e.data for e in events if e.data.get("step") == "handover_unavailable"]
+    assert len(missing) == 1 and "no access agent" in missing[0]["reason"]
+    assert pon_calls == []
+    assert events[-1].type is EventType.DONE
+    assert client.get(f"/v1/sessions/{session_id}").json()["active_agent"] == "inhome-agent"
+
+
+def test_direct_handover_target_and_hop_limit(fake_agent, orchestrator_with_agents):
+    ping = {"to": "access-pon", "from": "SOP-X", "context": "x"}
+    pong = {"to": "inhome", "from": "SOP-Y", "context": "y"}
+    inhome_url, inhome_calls = fake_agent(state={"sop": None, "handover": ping})
+    pon_url, pon_calls = fake_agent(state={"sop": None, "handover": pong})
+    client = orchestrator_with_agents({"inhome-agent": inhome_url, "access-pon-agent": pon_url})
+    session_id = new_session(client)
+
+    _, events = send(client, session_id, "loop")
+
+    # in-home -> pon -> in-home, then the hop limit stops the ping-pong.
+    assert (len(inhome_calls), len(pon_calls)) == (2, 1)
+    assert [e.data["step"] for e in events if e.data.get("step") == "handover_unavailable"] \
+        == ["handover_unavailable"]
+    assert events[-1].type is EventType.DONE
+
+
+def test_consent_after_a_handover_is_sent_to_the_agent_that_asked(
+    fake_agent, orchestrator_with_agents
+):
+    ask = {"consent_id": "c-1", "action": "scheduling.book_appointment",
+           "sop_id": "SOP-PON-001", "step_id": "S6", "arguments": {}}
+    inhome_url, inhome_calls = fake_agent(state={"sop": None, "handover": HANDOVER})
+    pon_url, pon_calls = fake_agent(ask_consent=ask)
+    client = orchestrator_with_agents(
+        {"inhome-agent": inhome_url, "access-pon-agent": pon_url}, carrier_tech="GPON"
+    )
+    session_id = new_session(client, "C1001")
+    send(client, session_id, "no internet")
+
+    response = client.post(
+        f"/v1/sessions/{session_id}/consent",
+        json={"consent_id": "c-1", "approved": True, "expert_name": "Sam"},
+    )
+
+    assert response.status_code == 200
+    assert len(inhome_calls) == 1 and len(pon_calls) == 2
+    assert pon_calls[1]["json"]["consent"]["approved"] is True

@@ -23,26 +23,25 @@ from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
-from inhome_agent.decide import Decision, choose
-from inhome_agent.sop_prompts import (
-    ANSWER_SYSTEM,
-    DECIDE_SYSTEM,
-    KNOWLEDGE_SYSTEM,
-    answer_prompt,
-    intent_prompt,
-    knowledge_prompt,
-    reply_outcome_prompt,
-    step_outcome_prompt,
-)
 from poc_common.config import Config
 from poc_common.events import AgentRequest, ConsentRequest, Event, EventType
 from poc_common.llm import ThinkingFilter, apply_thinking_mode, strip_thinking
 from poc_common.mcp_client import McpToolError, call_tool
+from sop_agent.decide import Decision, choose
+from sop_agent.sop_prompts import (
+    DECIDE_SYSTEM,
+    answer_prompt,
+    answer_system,
+    intent_prompt,
+    knowledge_prompt,
+    knowledge_system,
+    reply_outcome_prompt,
+    step_outcome_prompt,
+)
+from sop_agent.spec import AgentSpec
 
 logger = logging.getLogger(__name__)
 
-AGENT = "inhome"
-SOURCE = "inhome-agent"
 MAX_STEPS_PER_TURN = 15
 MAX_PROCEDURES_PER_TURN = 3
 ANSWER_NODES = {"compose", "knowledge"}
@@ -71,6 +70,7 @@ class TurnState(TypedDict, total=False):
     steps_run: int
     answer: str
     sop_state: dict | None   # SOP position to save for the next turn
+    handover: dict | None    # set when the procedure ends by handing the case to another agent
 
 
 @dataclass
@@ -83,11 +83,49 @@ def _trail_item(step: dict, **extra: Any) -> dict:
             "title": step["title"], **extra}
 
 
-def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session_id: str | None):
-    tool_servers = {"network-diagnostics": config.diagnostics_mcp_url}
+def _handover_context(trail: list[dict]) -> str:
+    """What the next agent should know: the checks done and what they showed."""
+    parts = []
+    for item in trail:
+        if item.get("outcome"):
+            reason = f" ({item['reason']})" if item.get("reason") else ""
+            parts.append(f"{item['title']}: {item['outcome']}{reason}")
+    return "; ".join(parts)[:600]
+
+
+def consent_arguments(
+    action: str, trail: list[dict], customer_id: str
+) -> tuple[dict | None, str]:
+    """Arguments to run once approved, plus a sentence telling the expert exactly what they approve.
+
+    Returns (None, reason) when the action cannot be proposed.
+    """
+    arguments: dict[str, Any] = {"customer_id": customer_id}
+    if action != "book_appointment":
+        return arguments, ""
+    for item in reversed(trail):
+        result = item.get("result")
+        tool_name = item.get("tool") or ""
+        if tool_name.endswith("search_appointment_slots") and isinstance(result, dict):
+            slots = result.get("slots") or []
+            if slots:
+                slot = slots[0]
+                arguments["slot_id"] = slot["slot_id"]
+                when = f"{slot['weekday']} {slot['date']}, {slot['from']}-{slot['to']}"
+                return arguments, f"Proposed slot: {when}."
+    return None, "no free appointment slot was found to propose"
+
+
+def build_workflow(
+    llm: BaseChatModel, config: Config, spec: AgentSpec, customer_id: str, session_id: str | None
+):
+    tool_servers = {
+        "network-diagnostics": config.diagnostics_mcp_url,
+        "scheduling": config.scheduling_mcp_url,
+    }
 
     def emit(type_: EventType, **data: Any) -> None:
-        get_stream_writer()(Event(type=type_, source=SOURCE, session_id=session_id, data=data))
+        get_stream_writer()(Event(type=type_, source=spec.source, session_id=session_id, data=data))
 
     def status(step: str, **data: Any) -> None:
         emit(EventType.STATUS_UPDATE, step=step, **data)
@@ -189,7 +227,9 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
         return {"intent": chosen}
 
     async def select_sop(state: TurnState) -> dict:
-        found = await knowledge("find_troubleshooting_sop", symptom=state["message"], agent=AGENT)
+        found = await knowledge(
+            "find_troubleshooting_sop", symptom=state["message"], agent=spec.agent_id
+        )
         if not found["found"]:
             status("no_sop")
             return {"route": "exploratory"}
@@ -231,11 +271,13 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
                     "kind": "blocked", "step": step,
                     "detail": f"{step['tool']} is not part of this demo, so the approved action "
                               "cannot be carried out here"}}
+            arguments, proposal = consent_arguments(action, trail, customer_id)
+            if arguments is None:
+                return {**update, "stop": {"kind": "blocked", "step": step, "detail": proposal}}
             consent = ConsentRequest(
-                action=action, description=step["instruction"],
+                action=action, description=f"{step['instruction']} {proposal}".strip(),
                 risk="high" if action in HIGH_RISK_ACTIONS else "medium",
-                arguments={"customer_id": customer_id}, sop_id=step["doc_id"],
-                step_id=step["step_id"],
+                arguments=arguments, sop_id=step["doc_id"], step_id=step["step_id"],
             )
             emit(EventType.CONSENT_REQUEST, **consent.model_dump())
             return {**update, "stop": {
@@ -288,12 +330,19 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
             if stop["kind"] == "consent":
                 saved.update(consent_id=stop["consent_id"], action=stop["action"],
                              arguments=stop["arguments"])
+        handover = None
+        if stop["kind"] == "end" and step.get("end") == "handover":
+            handover = {"to": step["handover_to"], "from": step["citation"],
+                        "context": _handover_context(state.get("trail") or [])}
         status("reasoning", purpose="answer")
         prompt = answer_prompt(state["message"], state.get("trail") or [], stop)
-        return {"answer": await stream_answer(ANSWER_SYSTEM, prompt), "sop_state": saved}
+        return {"answer": await stream_answer(answer_system(spec), prompt), "sop_state": saved,
+                "handover": handover}
 
     async def knowledge_answer(state: TurnState) -> dict:
-        hits = await knowledge("search_knowledge", query=state["message"], agent=AGENT, top_k=4)
+        hits = await knowledge(
+            "search_knowledge", query=state["message"], agent=spec.agent_id, top_k=4
+        )
         seen = set()
         for hit in hits:
             if hit["doc_id"] not in seen:
@@ -303,7 +352,9 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
         if not hits:
             return {"route": "knowledge", "answer": NO_KNOWLEDGE_ANSWER, "sop_state": None}
         status("reasoning", purpose="answer")
-        answer = await stream_answer(KNOWLEDGE_SYSTEM, knowledge_prompt(state["message"], hits))
+        answer = await stream_answer(
+            knowledge_system(spec), knowledge_prompt(state["message"], hits)
+        )
         return {"route": "knowledge", "answer": answer, "sop_state": None}
 
     # ---- graph ------------------------------------------------------------------------------
@@ -343,13 +394,14 @@ def build_workflow(llm: BaseChatModel, config: Config, customer_id: str, session
 
 
 async def run_workflow(
-    request: AgentRequest, config: Config, llm: BaseChatModel, result: TurnResult
+    request: AgentRequest, config: Config, llm: BaseChatModel, spec: AgentSpec,
+    result: TurnResult,
 ) -> AsyncIterator[Event]:
     """Stream the workflow's events; `result.route` tells the caller what happened."""
-    workflow = build_workflow(llm, config, request.customer_id, request.session_id)
+    workflow = build_workflow(llm, config, spec, request.customer_id, request.session_id)
 
     def event(type_: EventType, **data: Any) -> Event:
-        return Event(type=type_, source=SOURCE, session_id=request.session_id, data=data)
+        return Event(type=type_, source=spec.source, session_id=request.session_id, data=data)
 
     stream_filter, message_id, streamed, hidden = ThinkingFilter(), None, False, 0
     final: TurnState = {}
@@ -390,4 +442,5 @@ async def run_workflow(
     elif not streamed and answer:
         yield event(EventType.AGENT_MESSAGE_DELTA, message_id=message_id, text=answer)
     yield event(EventType.AGENT_MESSAGE, message_id=message_id, text=answer, final=True)
-    yield event(EventType.AGENT_STATE, state={"sop": final.get("sop_state")})
+    yield event(EventType.AGENT_STATE,
+                state={"sop": final.get("sop_state"), "handover": final.get("handover")})

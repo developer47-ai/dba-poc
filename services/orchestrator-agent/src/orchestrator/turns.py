@@ -36,6 +36,17 @@ async def stream_agent(
         raise AgentUnavailableError(str(exc) or type(exc).__name__) from exc
 
 
+MAX_HANDOVERS = 2
+
+
+def _handover_message(source: str, handover: dict, message: str) -> str:
+    """What the next agent is told: where the case comes from, what was found, what was asked."""
+    note = f"Handed over from {source} ({handover.get('from', 'procedure')})."
+    if handover.get("context"):
+        note += f" Findings so far: {handover['context']}."
+    return f"{note} Expert's request: {message}"[:4000]
+
+
 async def run_turn(
     session: Session,
     message: str,
@@ -59,40 +70,60 @@ async def run_turn(
                     to_agent=decision.agent, reason=decision.reason)
         session.active_agent = decision.agent
 
-    request = AgentRequest(
-        customer_id=session.customer_id,
-        message=message,
-        session_id=session.session_id,
-        history=session.history,
-        state=session.agent_state.get(decision.agent),
-        consent=consent,
-    )
-    answer: list[str] = []
+    agent, text, hops = decision.agent, message, 0
+    answers: list[tuple[str, str]] = []
     try:
-        async for item in stream_agent(
-            client, router.registry.url(decision.agent), request, correlation_id
-        ):
-            if item.type is EventType.DONE:
-                continue
-            if item.type is EventType.AGENT_STATE:
-                # Internal bookkeeping: keep it for the agent's next turn, do not show it.
-                state = item.data.get("state") or {}
-                session.agent_state[decision.agent] = state
-                if (state.get("sop") or {}).get("awaiting") != "consent":
-                    session.pending_consent = None
-                continue
-            if item.type is EventType.CONSENT_REQUEST:
-                session.pending_consent = {**item.data, "agent": decision.agent}
-            item.session_id, item.correlation_id = session.session_id, correlation_id
-            if item.type is EventType.AGENT_MESSAGE and item.data.get("final", True) \
-                    and item.data.get("text"):
-                answer.append(item.data["text"])
-            yield item
+        while True:
+            request = AgentRequest(
+                customer_id=session.customer_id,
+                message=text,
+                session_id=session.session_id,
+                history=session.history,
+                state=session.agent_state.get(agent),
+                consent=consent if hops == 0 else None,
+            )
+            handover = None
+            async for item in stream_agent(
+                client, router.registry.url(agent), request, correlation_id
+            ):
+                if item.type is EventType.DONE:
+                    continue
+                if item.type is EventType.AGENT_STATE:
+                    # Internal bookkeeping: keep it for the agent's next turn, do not show it.
+                    state = item.data.get("state") or {}
+                    handover = state.pop("handover", None)
+                    session.agent_state[agent] = state
+                    if (state.get("sop") or {}).get("awaiting") != "consent":
+                        session.pending_consent = None
+                    continue
+                if item.type is EventType.CONSENT_REQUEST:
+                    session.pending_consent = {**item.data, "agent": agent}
+                item.session_id, item.correlation_id = session.session_id, correlation_id
+                if item.type is EventType.AGENT_MESSAGE and item.data.get("final", True) \
+                        and item.data.get("text"):
+                    answers.append((agent, item.data["text"]))
+                yield item
+
+            if not handover:
+                break
+            target, why = await router.resolve_handover(handover["to"], session.customer_id)
+            if target is None or target == agent or hops >= MAX_HANDOVERS:
+                yield event(EventType.STATUS_UPDATE, step="handover_unavailable",
+                            from_agent=agent, requested=handover["to"], reason=why)
+                break
+            yield event(EventType.AGENT_HANDOFF, from_agent=agent, to_agent=target,
+                        reason=f"{handover.get('from', 'procedure')} → {why}",
+                        context=handover.get("context", ""))
+            session.active_agent = target
+            text = _handover_message(agent, handover, message)
+            agent, hops = target, hops + 1
     except AgentUnavailableError as exc:
-        yield event(EventType.ERROR, message=f"The {decision.agent} is not available: {exc}")
+        yield event(EventType.ERROR, message=f"The {agent} is not available: {exc}")
 
     # Only completed exchanges enter the history, so a failed turn can simply be retried.
-    if answer:
+    if answers:
+        labelled = len({a for a, _ in answers}) > 1
+        reply = "\n\n".join(f"[{a}] {t}" if labelled else t for a, t in answers)
         session.history.append(ChatTurn(role="user", content=message))
-        session.history.append(ChatTurn(role="assistant", content="\n\n".join(answer)))
+        session.history.append(ChatTurn(role="assistant", content=reply))
     yield event(EventType.DONE)

@@ -149,10 +149,10 @@ if stream is not None:
                     status.markdown(line)
                 status.update(label=view.status_label)
                 if event.type in TEXT_EVENTS:
-                    answer.markdown(view.text + ("" if view.final else " ▌"))
+                    answer.markdown(view.full_text + ("" if view.final else " ▌"))
         except OrchestratorError as exc:
             view.error = str(exc)
-        answer.markdown(view.text or "_No answer._")
+        answer.markdown(view.full_text or "_No answer._")
         render_extras(view.citations, view.consent)
         if view.error:
             st.error(view.error)
@@ -161,7 +161,7 @@ if stream is not None:
         )
 
     state.messages.append({
-        "role": "assistant", "content": view.text, "log": view.log, "error": view.error,
+        "role": "assistant", "content": view.full_text, "log": view.log, "error": view.error,
         "citations": view.citations, "consent": view.consent,
     })
     state.pending_consent = view.consent

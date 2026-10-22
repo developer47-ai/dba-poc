@@ -32,7 +32,8 @@ def statuses(events, step):
 
 
 def saved_state(events):
-    return next(e.data["state"] for e in events if e.type is EventType.AGENT_STATE)
+    state = next(e.data["state"] for e in events if e.type is EventType.AGENT_STATE)
+    return {k: v for k, v in state.items() if not (k == "handover" and v is None)}
 
 
 def answer(events):
@@ -136,7 +137,11 @@ def test_problem_outside_the_home_ends_with_a_handover(config):
 
     assert [s["step_id"] for s in statuses(events, "sop_step")] == ["S1", "S2", "S9"]
     assert "PROCEDURE ENDS (handover → access-network)" in llm.received[3][1].content
-    assert saved_state(events) == {"sop": None}
+    state = saved_state(events)
+    assert state["sop"] is None
+    assert state["handover"]["to"] == "access-network"
+    assert state["handover"]["from"] == "SOP-IH-001 v1.0 › S9"
+    assert "Check the indicator lights: access_problem" in state["handover"]["context"]
 
 
 def test_knowledge_question_is_answered_from_cited_passages(config):

@@ -30,12 +30,24 @@ class TurnView:
     procedure: str | None = None
     citations: list[str] = field(default_factory=list)
     consent: dict[str, Any] | None = None
+    # Answers of agents that handed the case over earlier in this turn: (agent, text).
+    earlier: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def full_text(self) -> str:
+        """The answer shown to the user: each agent's part, labelled once there is more than one."""
+        parts = [*self.earlier, *([(self.agent or "agent", self.text)] if self.text else [])]
+        if len(parts) <= 1:
+            return parts[0][1] if parts else ""
+        return "\n\n".join(f"**{agent}**\n\n{text}" for agent, text in parts)
 
     @property
     def summary_label(self) -> str:
         if self.error:
             return "Something went wrong"
         agent = self.agent or "agent"
+        if self.earlier:
+            agent = " → ".join([*(a for a, _ in self.earlier), agent])
         sop = f" · {self.procedure}" if self.procedure else ""
         return f"{agent}{sop} · {len(self.tools)} tool call(s)"
 
@@ -118,7 +130,16 @@ def apply_event(view: TurnView, event: Event) -> str | None:
         case EventType.STATUS_UPDATE if data.get("step") == "thinking":
             view.status_label = f"🧠 Thinking… ({data.get('tokens', 0)} tokens)"
         case EventType.AGENT_HANDOFF:
+            if view.text and view.agent:
+                view.earlier.append((view.agent, view.text))
+            view.text, view.final, view.message_id, view.procedure = "", False, None, None
+            view.agent = data.get("to_agent")
+            view.status_label = f"Handed over to {view.agent}…"
             line = f"🔀 Hand-over: {data.get('from_agent')} → **{data.get('to_agent')}**"
+            if data.get("context"):
+                line += f" — {data['context']}"
+        case EventType.STATUS_UPDATE if data.get("step") == "handover_unavailable":
+            line = f"⚠️ No agent for this hand-over: {data.get('reason')}"
         case EventType.TOOL_CALL if data.get("status") == "started":
             view.tools.append(ToolStep(data["tool"], data.get("arguments") or {}))
             view.status_label = f"Running {data['tool']}…"

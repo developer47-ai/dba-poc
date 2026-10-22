@@ -170,8 +170,8 @@ Built step by step; each step is one pull request and ends in something you can 
 
 ### Phase D — Full multi-agent platform → **M3: all scenarios**
 - [ ] **Step 9 — `installed-base-mcp` + `quickscan-service`**
-- [ ] **Step 10 — Access PON / P2P / Copper agents**, carrier routing and agent hand-over
-- [x] **Step 11 — Human-in-the-loop** (minimal): Approve / Decline buttons, audited decisions, the approved action really runs and the SOP continues; shown on two scenarios (C1002 reboot, C1003 Wi-Fi reset) plus the decline path. `scheduling-mcp` / `ticketing-mcp` are left for later.
+- [x] **Step 10 — Access-PON agent + agent hand-over** (minimal): the In-Home agent hands a fiber case over to the Access-PON agent (SOP-PON-001), chosen by the customer's carrier technology; the Access-PON agent proposes an engineer slot and books it only after approval (`scheduling-mcp`). P2P / Copper agents are left out of this demo; the orchestrator reports a hand-over without an agent.
+- [x] **Step 11 — Human-in-the-loop** (minimal): Approve / Decline buttons, audited decisions, the approved action really runs and the SOP continues; shown on two scenarios (C1002 reboot, C1003 Wi-Fi reset) plus the decline path, and the engineer booking of C1001. `ticketing-mcp` is left for later.
 - [ ] **Step 12 — Memory**: Postgres checkpointer, session cache, customer memory
 
 ### Phase E — Operate & share → **v0.1.0 release**

@@ -1,7 +1,9 @@
-"""Prompts for the SOP-guided workflow (the exploratory fallback uses prompts.SYSTEM_PROMPT)."""
+"""Prompts for the SOP-guided workflow (the fallback uses prompts.exploratory_prompt)."""
 
 import json
 from typing import Any
+
+from sop_agent.spec import AgentSpec
 
 DECIDE_SYSTEM = (
     "You are a careful classifier in NetCo's customer support system. Read the facts and decide "
@@ -9,8 +11,8 @@ DECIDE_SYSTEM = (
     '"unclear" when the facts do not let you decide; never guess.'
 )
 
-ANSWER_SYSTEM = """You are the In-Home Agent of NetCo, a telecom operator, writing to a customer \
-support expert. Use ONLY the facts given. Never claim an action was done unless the facts say so.
+_ANSWER_TEMPLATE = """You are {role}, writing to a customer support expert. Use ONLY the facts \
+given. Never claim an action was done unless the facts say so.
 
 Write short, plain English with exactly these three parts:
 Findings: what the checks showed.
@@ -20,10 +22,18 @@ Next step: what the expert should do now.
 After each finding and the next step, cite its source in square brackets exactly as given, \
 for example [SOP-IH-001 › S2]."""
 
-KNOWLEDGE_SYSTEM = """You are the In-Home Agent of NetCo, answering a customer support expert's \
-question. Answer ONLY from the numbered passages. If they do not contain the answer, say that \
-the approved knowledge base does not cover it. Keep it short and cite the passages you used in \
-square brackets exactly as given, for example [KB-LED-001 v1.0]."""
+_KNOWLEDGE_TEMPLATE = """You are {role}, answering a customer support expert's question. Answer \
+ONLY from the numbered passages. If they do not contain the answer, say that the approved \
+knowledge base does not cover it. Keep it short and cite the passages you used in square \
+brackets exactly as given, for example [KB-LED-001 v1.0]."""
+
+
+def answer_system(spec: AgentSpec) -> str:
+    return _ANSWER_TEMPLATE.format(role=spec.role)
+
+
+def knowledge_system(spec: AgentSpec) -> str:
+    return _KNOWLEDGE_TEMPLATE.format(role=spec.role)
 
 MAX_RESULT_CHARS = 1200
 

@@ -1,17 +1,15 @@
 [project]
 name = "inhome-agent"
 version = "0.1.0"
-description = "In-Home specialist agent: diagnoses modem, Wi-Fi and in-home device problems via MCP tools"
+description = "In-Home specialist agent: modem, Wi-Fi and in-home device problems (SOP-guided)"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.115",
-  "langgraph>=0.6",
-  "langchain-core>=0.3",
-  "uvicorn>=0.30",
+  "sop-agent",
   "poc-common[llm]",
 ]
 
 [tool.uv.sources]
+sop-agent = { workspace = true }
 poc-common = { workspace = true }
 
 [build-system]

@@ -1,8 +1,8 @@
 import pytest
 from langchain_core.messages import AIMessage
 
-from inhome_agent.decide import choose, outcome_tool, parse_decision
 from poc_common.fake_llm import ScriptedChatModel, tool_call_message
+from sop_agent.decide import choose, outcome_tool, parse_decision
 
 OPTIONS = ["access_problem", "modem_fault", "modem_stuck"]
 
