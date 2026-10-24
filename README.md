@@ -133,6 +133,14 @@ publishes the measured time to first tool call, first answer token and whole tur
 
 The agents, MCP servers (except knowledge) and the network simulator run on the internal Docker network only.
 
+### Memory
+
+| Kind | What | Where |
+|---|---|---|
+| Short-term | The case: chat history, each agent's position in its procedure, the approval it waits for, the audit log of decisions | Postgres gent.session, written after every turn (`SESSION_STORE=postgres`, the compose default; `memory` keeps it in RAM) |
+| Context window | Agents receive only the last 12 messages, so a small local model keeps room for the current case | orchestrator |
+| Cross-session | The customer's earlier cases, listed and resumable in the chat UI (*Earlier cases of this customer*), including an approval that was still waiting | `GET /v1/sessions?customer_id=` |
+
 ### Observability
 
 Every chat turn is **one OpenTelemetry trace** that follows the request across the services - the
@@ -189,7 +197,7 @@ Built step by step; each step is one pull request and ends in something you can 
 - [ ] **Step 9 — `installed-base-mcp` + `quickscan-service`**
 - [x] **Step 10 — Access-PON agent + agent hand-over** (minimal): the In-Home agent hands a fiber case over to the Access-PON agent (SOP-PON-001), chosen by the customer's carrier technology; the Access-PON agent proposes an engineer slot and books it only after approval (`scheduling-mcp`). P2P / Copper agents are left out of this demo; the orchestrator reports a hand-over without an agent.
 - [x] **Step 11 — Human-in-the-loop** (minimal): Approve / Decline buttons, audited decisions, the approved action really runs and the SOP continues; shown on two scenarios (C1002 reboot, C1003 Wi-Fi reset) plus the decline path, and the engineer booking of C1001. `ticketing-mcp` is left for later.
-- [ ] **Step 12 — Memory**: Postgres checkpointer, session cache, customer memory
+- [x] **Step 12 — Memory** (minimal): sessions (history, each agent's position in its SOP, the pending approval, the audit log) are stored in Postgres after every turn and survive a restart; the expert can resume an earlier case or look at the customer's earlier cases; agents only receive the last 12 messages. CI restarts the orchestrator and checks the case is intact. Not built: LLM-written case summaries, a Valkey cache.
 
 ### Phase E — Operate & share → **v0.1.0 release**
 - [x] **Step 13 — Observability** (minimal): OpenTelemetry traces in Jaeger, one trace per chat turn across orchestrator and agents (SOP steps, LLM calls, MCP tool calls), link from the chat UI, verified in CI. Langfuse and feedback scores are left out (Langfuse v4 needs six containers).

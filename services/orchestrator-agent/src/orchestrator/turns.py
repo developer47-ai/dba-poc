@@ -45,6 +45,9 @@ async def stream_agent(
 
 
 MAX_HANDOVERS = 2
+# Agents see the latest messages only: the full chat stays stored, but a small local model has a
+# limited context window and old turns would crowd out the current case.
+MAX_AGENT_HISTORY = 12
 
 
 def _handover_message(source: str, handover: dict, message: str) -> str:
@@ -111,7 +114,7 @@ async def _run_turn(
                 customer_id=session.customer_id,
                 message=text,
                 session_id=session.session_id,
-                history=session.history,
+                history=session.history[-MAX_AGENT_HISTORY:],
                 state=session.agent_state.get(agent),
                 consent=consent if hops == 0 else None,
             )

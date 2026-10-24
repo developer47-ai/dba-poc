@@ -22,6 +22,7 @@ x-service-env: &service-env
   ORCHESTRATOR_URL: http://orchestrator:8000
   DATABASE_URL: postgresql://${POSTGRES_USER:-dba}:${POSTGRES_PASSWORD:-dba_local_pw}@postgres:5432/${POSTGRES_DB:-dba}
   KNOWLEDGE_DIR: /app/knowledge
+  SESSION_STORE: ${SESSION_STORE:-postgres}
 
 x-health: &health
   interval: 10s
@@ -63,6 +64,7 @@ services:
     environment: *service-env
     depends_on:
       jaeger: { condition: service_started }
+      postgres: { condition: service_healthy }
       inhome-agent: { condition: service_healthy }
       access-pon-agent: { condition: service_healthy }
       network-simulator: { condition: service_healthy }

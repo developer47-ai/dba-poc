@@ -40,6 +40,13 @@ class OrchestratorClient:
             "POST", "/v1/sessions", json={"customer_id": customer_id, "expert_name": expert_name}
         )
 
+    def list_sessions(self, customer_id: str) -> list[dict[str, Any]]:
+        """The customer's earlier cases, most recently active first."""
+        return self._request("GET", "/v1/sessions", params={"customer_id": customer_id})
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/v1/sessions/{session_id}")
+
     def stream_turn(self, session_id: str, message: str) -> Iterator[Event]:
         """Yield the turn's events as soon as each one arrives."""
         return self._stream(f"/v1/sessions/{session_id}/messages", {"message": message})

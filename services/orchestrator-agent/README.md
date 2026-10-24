@@ -8,6 +8,7 @@ Server-Sent Events (SSE).
 
 ```http
 POST /v1/sessions                       { "customer_id": "C1002", "expert_name": "Sam" }   -> 201
+GET  /v1/sessions?customer_id=C1001      the customer's earlier cases, newest first
 GET  /v1/sessions/{session_id}          session summary: history, pending approval, consent audit log
 POST /v1/sessions/{session_id}/messages { "message": "Customer has no internet" }        -> text/event-stream
 POST /v1/sessions/{session_id}/consent  { "consent_id": "…", "approved": true, "comment": "…" } -> text/event-stream
@@ -26,6 +27,14 @@ agent emits a `consent_request` and **does not act**. The expert answers with `P
 - the agent then continues the SOP: approved → run the action, re-check, finish; declined → the
   step's `declined` path (for example escalation) and nothing is changed.
 
+## Memory
+
+Sessions are stored by `SessionStore` (RAM) or `PgSessionStore` (Postgres, table `agent.session`,
+chosen with `SESSION_STORE`). A session is saved when it is created, after every turn and when an
+approval decision is logged (before the action runs). After a restart a session is loaded from the
+database the first time it is asked for, including a pending approval, which can still be decided.
+`GET /v1/sessions?customer_id=C1001` lists the customer's cases, newest first. Agents receive only
+the last 12 messages (`MAX_AGENT_HISTORY`); the stored chat is complete.
 ## Agent hand-over
 
 When a procedure ends with `end: handover` the agent reports it (an internal `handover` note in

@@ -38,6 +38,9 @@ class Config(BaseSettings):
     )
     jaeger_ui_url: str = "http://localhost:16686"
 
+    # Where the orchestrator keeps sessions: "memory" (lost on restart) or "postgres".
+    session_store: str = "memory"
+
     # Data stores
     database_url: str = "postgresql://dba:dba_local_pw@localhost:5432/dba"
     valkey_url: str = "redis://localhost:6379/0"

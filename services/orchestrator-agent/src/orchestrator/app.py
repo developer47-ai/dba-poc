@@ -7,12 +7,12 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from orchestrator.routing import AgentRegistry, Router
-from orchestrator.sessions import SessionStore, UnknownSessionError
+from orchestrator.sessions import PgSessionStore, SessionStore, UnknownSessionError
 from orchestrator.turns import SOURCE, run_turn
 from poc_common.config import Config, get_config
 from poc_common.events import ConsentResponse
@@ -37,9 +37,13 @@ def create_app(
     *,
     registry: AgentRegistry | None = None,
     heartbeat_s: float = 15.0,
+    store: SessionStore | None = None,
 ) -> FastAPI:
     config = config or get_config()
     registry = registry or AgentRegistry.from_config(config)
+    if store is None:
+        store = PgSessionStore(config.database_url) if config.session_store == "postgres" \
+            else SessionStore()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -47,9 +51,10 @@ def create_app(
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=600.0)) as client:
             app.state.http = client
             yield
+        store.close()
 
     app = FastAPI(title="Orchestrator", version="0.1.0", lifespan=lifespan)
-    app.state.sessions = SessionStore()
+    app.state.sessions = store
     app.state.router = Router(registry)
     instrument_fastapi(app)
 
@@ -66,6 +71,14 @@ def create_app(
         session = app.state.sessions.create(body.customer_id.strip(), body.expert_name)
         logger.info("session created for customer %s", session.customer_id)
         return session.summary()
+
+    @app.get("/v1/sessions")
+    def list_sessions(
+        customer_id: str = Query(min_length=1, max_length=64), limit: int = 10
+    ) -> list:
+        """The customer's earlier cases, most recently active first (cross-session memory)."""
+        found = app.state.sessions.list_for_customer(customer_id.strip(), max(1, min(limit, 50)))
+        return [session.overview() for session in found]
 
     @app.get("/v1/sessions/{session_id}")
     def get_session(session_id: str) -> dict:
@@ -110,6 +123,7 @@ def create_app(
                     yield item
             finally:
                 session.end_turn()
+                app.state.sessions.save(session)
 
         return StreamingResponse(
             sse_with_heartbeats(events(), heartbeat_s),
@@ -155,6 +169,7 @@ def create_app(
             "risk": pending.get("risk"), "approved": body.approved, "comment": body.comment,
             "decided_by": session.expert_name, "decided_at": datetime.now(UTC).isoformat(),
         })
+        app.state.sessions.save(session)  # the audit entry is stored before the action runs
         logger.info("consent %s for %s: %s", body.consent_id, pending["action"],
                     "approved" if body.approved else "declined")
         correlation_id = set_correlation_id(x_correlation_id or new_correlation_id())

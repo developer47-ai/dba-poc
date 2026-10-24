@@ -10,7 +10,9 @@
 3. Hand-over: customer C1001 (fiber, no light). The In-Home agent finds the problem is outside the
    home and hands over to the Access-PON agent, which follows SOP-PON-001 and asks approval to
    book an engineer; the approved booking must be confirmed by the scheduling MCP.
-4. Observability: that hand-over turn must be one distributed trace in Jaeger that spans the
+4. Memory: after the orchestrator container is restarted (E2E_RESTART=1), the hand-over case must
+   still be there, complete, and listed among the customer's earlier cases.
+5. Observability: that hand-over turn must be one distributed trace in Jaeger that spans the
    orchestrator and both agents, with SOP steps, LLM calls and MCP tool calls.
 
     python scripts/e2e_check.py   # ORCHESTRATOR_URL / CHAT_UI_URL / KNOWLEDGE_URL override defaults
@@ -19,6 +21,7 @@
 import http.client
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -269,7 +272,8 @@ def run_handover(attempt: int) -> tuple[list[str], dict]:
     if not consent or consent.get("action") != "book_appointment":
         problems.append(f"expected an approval request for book_appointment, got {consent}")
     metrics = {"agents": agents, "procedures": procedures, "tools": tools,
-               "answers": finals, "booked": "–", "trace": {}}
+               "answers": finals, "booked": "–", "trace": {}, "session_id": session_id,
+               "customer_id": customer}
     if problems:
         return problems, metrics
     trace_problems, metrics["trace"] = check_trace(trace_id)
@@ -345,6 +349,28 @@ def trace_line(trace: dict) -> str:
     return (f"**Trace in Jaeger** `{trace['trace_id']}`: {trace['spans']} spans across "
             f"{', '.join(trace['services'])} · {trace['sop_steps']} SOP steps · "
             f"{trace['llm_calls']} LLM calls · {trace['mcp_calls']} MCP tool calls\n\n")
+
+
+def check_memory_after_restart(session_id: str, customer_id: str) -> list[str]:
+    """Sessions live in Postgres: a restarted orchestrator must still know the whole case."""
+    before = session_state(session_id)
+    print("\n[memory] restarting the orchestrator container ...")
+    subprocess.run(["docker", "compose", "restart", "orchestrator"], check=True)
+    wait_for("orchestrator", f"{ORCHESTRATOR}/health")
+    after = session_state(session_id)
+    problems = []
+    for key in ("history", "consent_log", "active_agent", "agent_state", "created_at"):
+        if after.get(key) != before.get(key):
+            problems.append(f"{key} changed across the restart")
+    if len(after.get("history", [])) < 2:
+        problems.append("the conversation history is missing after the restart")
+    earlier = request_json("GET", f"{ORCHESTRATOR}/v1/sessions?customer_id={customer_id}")
+    if session_id not in [case["session_id"] for case in earlier]:
+        problems.append("the case is not listed among the customer's earlier cases")
+    if not problems:
+        print(f"[memory] ok: {len(after['history'])} messages, {len(after['consent_log'])} "
+              f"decision(s), active agent {after['active_agent']}; {len(earlier)} earlier case(s)")
+    return problems
 
 
 def write_handover_summary(metrics: dict, passed: bool) -> None:
@@ -478,6 +504,11 @@ def main() -> None:
             sys.exit(f"\nE2E FAILED ({name} scenario)")
         summarize(metrics, passed=True)
         results.append(metrics)
+    if os.getenv("E2E_RESTART") == "1":
+        handover = results[-1]
+        problems = check_memory_after_restart(handover["session_id"], handover["customer_id"])
+        if problems:
+            sys.exit(f"\nE2E FAILED (memory): {'; '.join(problems)}")
     print("\nE2E PASSED - knowledge search, SOP-guided troubleshooting, approval and the "
           "multi-agent hand-over work end to end.")
 

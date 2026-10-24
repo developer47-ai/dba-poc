@@ -34,6 +34,26 @@ def customer_label(customer: dict) -> str:
     )
 
 
+def restore_session(summary: dict) -> None:
+    """Continue an earlier case: show its stored conversation and any approval still waiting."""
+    state.session = summary
+    state.messages = [{"role": t["role"], "content": t["content"]} for t in summary["history"]]
+    state.pending_consent = summary.get("pending_consent")
+    if state.pending_consent:
+        last = next((m for m in reversed(state.messages) if m["role"] == "assistant"), None)
+        if last is None:
+            last = {"role": "assistant", "content": ""}
+            state.messages.append(last)
+        last["consent"] = state.pending_consent
+
+
+def case_label(case: dict) -> str:
+    when = case["updated_at"][:16].replace("T", " ")
+    waiting = " · ⏳ approval pending" if case["awaiting_approval"] else ""
+    question = case["first_question"] or "(no messages)"
+    return f"{when} · {case['turns']} turn(s){waiting} · {question[:40]}"
+
+
 def render_activity(log: list[str]) -> None:
     if log:
         with st.expander(f"Agent activity ({len(log)} steps)"):
@@ -77,6 +97,19 @@ with st.sidebar:
         state.session = client.create_session(customer_id, expert_name)
         state.messages = []
         state.pending_consent = None
+    try:
+        earlier = [c for c in client.list_sessions(customer_id)
+                   if not state.session or c["session_id"] != state.session["session_id"]]
+    except OrchestratorError:
+        earlier = []
+    if earlier:
+        chosen = st.selectbox(
+            "Earlier cases of this customer", earlier, format_func=case_label,
+            help="Cases are stored in Postgres, so they survive a restart.",
+        )
+        if st.button("Resume this case", use_container_width=True):
+            restore_session(client.get_session(chosen["session_id"]))
+            st.rerun()
     if st.button(
         "Reset customer's network", use_container_width=True,
         help="Restore the scenario's starting state (undo reboots and resets)",

@@ -49,3 +49,19 @@ def test_stream_consent_sends_the_decision_and_streams_the_follow_up(orchestrato
     assert events[-1].type is EventType.DONE
     with pytest.raises(OrchestratorError, match="HTTP 409"):
         list(client.stream_consent(session_id, "other", True))
+
+def test_earlier_cases_can_be_listed_and_reopened(orchestrator_url, answer):
+    client = OrchestratorClient(orchestrator_url)
+    session_id = client.create_session("C1005", "Sam")["session_id"]
+    list(client.stream_turn(session_id, "port is down"))
+
+    cases = client.list_sessions("C1005")
+    reopened = client.get_session(session_id)
+
+    assert cases[0]["session_id"] == session_id and cases[0]["first_question"] == "port is down"
+    assert [t["role"] for t in reopened["history"]] == ["user", "assistant"]
+    assert reopened["history"][1]["content"] == answer
+    assert reopened["pending_consent"]["action"] == "reboot_device"
+    assert client.list_sessions("C0000") == []
+    with pytest.raises(OrchestratorError, match="HTTP 404"):
+        client.get_session("missing")
