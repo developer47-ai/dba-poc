@@ -31,6 +31,13 @@ class Config(BaseSettings):
     llm_thinking: bool = False
     llm_max_tokens: int | None = 800
 
+    # Observability: traces go to Jaeger over OTLP/HTTP (the standard OTel variable). Tracing is
+    # off when no endpoint is set.
+    otlp_endpoint: str | None = Field(
+        default=None, validation_alias=AliasChoices("OTEL_EXPORTER_OTLP_ENDPOINT", "OTLP_ENDPOINT")
+    )
+    jaeger_ui_url: str = "http://localhost:16686"
+
     # Data stores
     database_url: str = "postgresql://dba:dba_local_pw@localhost:5432/dba"
     valkey_url: str = "redis://localhost:6379/0"

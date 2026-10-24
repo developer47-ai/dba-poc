@@ -6,6 +6,7 @@ Requires the optional `llm` extra: `uv sync --extra llm` (installs langchain-ope
 from typing import Any
 
 from poc_common.config import Config, get_config
+from poc_common.tracing import tracing_enabled
 
 
 def get_chat_model(config: Config | None = None, **overrides: Any):
@@ -21,6 +22,12 @@ def get_chat_model(config: Config | None = None, **overrides: Any):
         "max_tokens": config.llm_max_tokens,
         "streaming": True,
     }
+    if tracing_enabled():
+        from poc_common.llm_trace import LlmSpanHandler
+
+        params["callbacks"] = [LlmSpanHandler()]
+        # Final stream chunk with token counts (Ollama supports it); shown on the llm.chat span.
+        params["stream_usage"] = True
     if _thinking_off(config):
         # Ollama maps this to think=false. Without it Qwen3 reasons in a separate `reasoning`
         # channel that costs minutes per model call on a CPU, invisible to the user.

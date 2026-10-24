@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import uvicorn
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 
 def free_port() -> int:
@@ -34,3 +35,16 @@ def run_app_in_thread(app, *, port: int | None = None) -> Iterator[str]:
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+@contextmanager
+def capture_spans() -> Iterator[InMemorySpanExporter]:
+    """Turn tracing on for a test and collect the finished spans in memory."""
+    from poc_common.tracing import setup_tracing, shutdown_tracing
+
+    exporter = InMemorySpanExporter()
+    setup_tracing("test-service", exporter=exporter)
+    try:
+        yield exporter
+    finally:
+        shutdown_tracing()

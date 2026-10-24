@@ -9,6 +9,7 @@ from chat_ui.view import TurnView, apply_event
 from poc_common.events import EventType
 
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
+JAEGER_UI_URL = os.getenv("JAEGER_UI_URL", "http://localhost:16686").rstrip("/")
 TEXT_EVENTS = {EventType.AGENT_MESSAGE_DELTA, EventType.AGENT_MESSAGE}
 
 st.set_page_config(page_title="NetCo · DBA Expert Console", page_icon="🛠️", layout="wide")
@@ -40,9 +41,13 @@ def render_activity(log: list[str]) -> None:
                 st.markdown(line)
 
 
-def render_extras(citations: list[str], consent: dict | None) -> None:
+def render_extras(
+    citations: list[str], consent: dict | None, trace_id: str | None = None
+) -> None:
     if citations:
         st.caption("Sources: " + " · ".join(citations))
+    if trace_id:
+        st.caption(f"[🔍 Open this turn's trace in Jaeger]({JAEGER_UI_URL}/trace/{trace_id})")
     if consent:
         st.warning(
             f"🛑 **Approval needed** — `{consent['action']}` "
@@ -105,7 +110,10 @@ for message in state.messages:
                 asked and state.pending_consent
                 and state.pending_consent["consent_id"] == asked["consent_id"]
             )
-            render_extras(message.get("citations", []), asked if still_pending else None)
+            render_extras(
+                message.get("citations", []), asked if still_pending else None,
+                message.get("trace_id"),
+            )
         if message.get("error"):
             st.error(message["error"])
 
@@ -153,7 +161,7 @@ if stream is not None:
         except OrchestratorError as exc:
             view.error = str(exc)
         answer.markdown(view.full_text or "_No answer._")
-        render_extras(view.citations, view.consent)
+        render_extras(view.citations, view.consent, view.trace_id)
         if view.error:
             st.error(view.error)
         status.update(
@@ -162,7 +170,7 @@ if stream is not None:
 
     state.messages.append({
         "role": "assistant", "content": view.full_text, "log": view.log, "error": view.error,
-        "citations": view.citations, "consent": view.consent,
+        "citations": view.citations, "consent": view.consent, "trace_id": view.trace_id,
     })
     state.pending_consent = view.consent
     if view.consent:

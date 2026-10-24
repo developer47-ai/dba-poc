@@ -16,6 +16,7 @@ from poc_common.config import Config, get_config
 from poc_common.events import AgentRequest, ChatTurn, Event, EventType
 from poc_common.llm import ThinkingFilter, apply_thinking_mode, get_chat_model, strip_thinking
 from poc_common.logging import set_correlation_id, set_session_id, setup_logging
+from poc_common.tracing import instrument_fastapi, setup_tracing
 from sop_agent.graph import build_graph
 from sop_agent.prompts import EXPLORATORY_NOTE, exploratory_prompt
 from sop_agent.spec import AgentSpec
@@ -150,6 +151,7 @@ def create_app(
 ) -> FastAPI:
     config = config or get_config()
     app = FastAPI(title=spec.title, version="0.1.0")
+    instrument_fastapi(app)
 
     @app.get("/health")
     def health() -> dict:
@@ -179,6 +181,7 @@ def main(spec: AgentSpec) -> None:
 
     config = get_config()
     setup_logging(spec.source, config.log_level, config.log_json)
+    setup_tracing(spec.source, config)
     uvicorn.run(
         create_app(spec, config), host=os.getenv("AGENT_HOST", "0.0.0.0"),
         port=int(os.getenv(spec.port_env, str(spec.default_port))),

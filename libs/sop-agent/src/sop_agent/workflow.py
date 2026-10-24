@@ -12,6 +12,7 @@ steps that need approval, at questions for the expert or customer, and at the en
 procedure. Progress is streamed as events; the answer is streamed token by token.
 """
 
+import functools
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -27,6 +28,7 @@ from poc_common.config import Config
 from poc_common.events import AgentRequest, ConsentRequest, Event, EventType
 from poc_common.llm import ThinkingFilter, apply_thinking_mode, strip_thinking
 from poc_common.mcp_client import McpToolError, call_tool
+from poc_common.tracing import annotate, span
 from sop_agent.decide import Decision, choose
 from sop_agent.sop_prompts import (
     DECIDE_SYSTEM,
@@ -243,6 +245,9 @@ def build_workflow(
         step, trail = state["step"], list(state.get("trail") or [])
         steps_run = state.get("steps_run", 0) + 1
         update: dict[str, Any] = {"trail": trail, "steps_run": steps_run}
+        annotate({"sop.id": step["doc_id"], "sop.step": step["step_id"],
+                  "sop.title": step["title"], "sop.actor": step["actor"],
+                  "sop.tool": step.get("tool")}, name=f"sop.step {step['step_id']}")
         status("sop_step", doc_id=step["doc_id"], step_id=step["step_id"], title=step["title"],
                actor=step["actor"], citation=step["citation"])
 
@@ -311,6 +316,7 @@ def build_workflow(
 
         trail.append(_trail_item(step, tool=step["tool"], result=result,
                                  outcome=decision.outcome or "unclear", reason=decision.reason))
+        annotate({"sop.outcome": decision.outcome or "unclear", "sop.reason": decision.reason})
         status("sop_outcome", doc_id=step["doc_id"], step_id=step["step_id"],
                outcome=decision.outcome, reason=decision.reason, source="agent")
         if decision.outcome is None:
@@ -322,6 +328,7 @@ def build_workflow(
 
     async def compose(state: TurnState) -> dict:
         stop, step = state["stop"], state["stop"]["step"]
+        annotate({"sop.stop": stop["kind"], "sop.id": step["doc_id"], "sop.step": step["step_id"]})
         saved = None
         if stop["kind"] in {"ask", "unclear", "consent"}:
             saved = {"doc_id": step["doc_id"], "version": step["version"],
@@ -366,13 +373,13 @@ def build_workflow(
         return "resume" if saved.get("awaiting") == "expert" else "intent"
 
     graph = StateGraph(TurnState)
-    graph.add_node("resume", resume)
-    graph.add_node("act", act)
-    graph.add_node("intent", intent)
-    graph.add_node("select_sop", select_sop)
-    graph.add_node("execute", execute)
-    graph.add_node("compose", compose)
-    graph.add_node("knowledge", knowledge_answer)
+    graph.add_node("resume", traced("resume", resume))
+    graph.add_node("act", traced("act", act))
+    graph.add_node("intent", traced("intent", intent))
+    graph.add_node("select_sop", traced("select_sop", select_sop))
+    graph.add_node("execute", traced("execute", execute))
+    graph.add_node("compose", traced("compose", compose))
+    graph.add_node("knowledge", traced("knowledge", knowledge_answer))
     graph.add_conditional_edges(START, start, ["act", "resume", "intent"])
     graph.add_conditional_edges(
         "act",
@@ -391,6 +398,17 @@ def build_workflow(
     graph.add_edge("compose", END)
     graph.add_edge("knowledge", END)
     return graph.compile()
+
+
+def traced(name: str, node):
+    """Run a workflow node inside a span, so the trace shows the procedure step by step."""
+
+    @functools.wraps(node)
+    async def wrapper(state):
+        with span(f"workflow.{name}"):
+            return await node(state)
+
+    return wrapper
 
 
 async def run_workflow(

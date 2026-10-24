@@ -14,6 +14,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from poc_common.logging import CORRELATION_HEADER, get_correlation_id
+from poc_common.tracing import annotate, span
 
 
 class McpToolError(RuntimeError):
@@ -74,11 +75,16 @@ async def call_tool(
     timeout_s: float = 30,
     read_timeout_s: float = 300,
 ) -> Any:
-    async with mcp_session(
-        url, correlation_id=correlation_id, timeout_s=timeout_s, read_timeout_s=read_timeout_s
-    ) as session:
-        result = await session.call_tool(name, arguments or {})
-    return parse_tool_result(name, result)
+    with span("mcp.call_tool", {"mcp.tool": name, "mcp.url": url}):
+        async with mcp_session(
+            url, correlation_id=correlation_id, timeout_s=timeout_s, read_timeout_s=read_timeout_s
+        ) as session:
+            result = await session.call_tool(name, arguments or {})
+        try:
+            return parse_tool_result(name, result)
+        except McpToolError as exc:
+            annotate({"mcp.error": str(exc)[:200]})
+            raise
 
 
 async def list_tools(url: str, *, correlation_id: str | None = None) -> list[dict[str, Any]]:

@@ -10,6 +10,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from poc_common.logging import set_correlation_id
 from poc_common.mcp_client import McpToolError, call_tool, list_tools
+from poc_common.testing import capture_spans
 
 
 def _free_port() -> int:
@@ -100,3 +101,18 @@ async def test_correlation_id_reaches_the_server(mcp_url):
 async def test_explicit_correlation_id_wins(mcp_url):
     set_correlation_id("ambient")
     assert await call_tool(mcp_url, "echo_correlation", correlation_id="explicit") == "explicit"
+
+
+async def test_each_tool_call_is_a_span_and_a_failure_marks_it(mcp_url):
+    with capture_spans() as exporter:
+        assert await call_tool(mcp_url, "add", {"a": 1, "b": 1}) == 2
+        with pytest.raises(McpToolError):
+            await call_tool(mcp_url, "explode")
+    calls = [s for s in exporter.get_finished_spans() if s.name == "mcp.call_tool"]
+    assert [c.attributes["mcp.tool"] for c in calls] == ["add", "explode"]
+    assert calls[0].status.status_code.name == "UNSET"
+    assert calls[1].status.status_code.name == "ERROR"
+    assert "backend unavailable" in calls[1].attributes["mcp.error"]
+    # The HTTP requests of the call are child spans, and the server receives the trace context.
+    http = [s for s in exporter.get_finished_spans() if s.name.startswith("POST")]
+    assert http and all(h.parent is not None for h in http)

@@ -18,6 +18,7 @@ from poc_common.config import Config, get_config
 from poc_common.events import ConsentResponse
 from poc_common.logging import new_correlation_id, set_correlation_id, set_session_id, setup_logging
 from poc_common.sse import sse_with_heartbeats
+from poc_common.tracing import instrument_fastapi, setup_tracing
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def create_app(
     app = FastAPI(title="Orchestrator", version="0.1.0", lifespan=lifespan)
     app.state.sessions = SessionStore()
     app.state.router = Router(registry)
+    instrument_fastapi(app)
 
     @app.exception_handler(UnknownSessionError)
     async def _unknown_session(_: Request, exc: UnknownSessionError):
@@ -169,6 +171,7 @@ def main() -> None:
 
     config = get_config()
     setup_logging(SOURCE, config.log_level, config.log_json)
+    setup_tracing(SOURCE, config)
     uvicorn.run(
         create_app(config),
         host=os.getenv("ORCHESTRATOR_HOST", "0.0.0.0"),

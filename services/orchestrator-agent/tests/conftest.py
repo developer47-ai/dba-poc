@@ -17,7 +17,7 @@ from orchestrator.routing import AgentRegistry
 from poc_common.config import Config
 from poc_common.events import Event, EventType
 from poc_common.fake_llm import ScriptedChatModel
-from poc_common.testing import run_app_in_thread
+from poc_common.testing import capture_spans, run_app_in_thread
 
 ROOT = Path(__file__).resolve().parents[3]
 SCENARIO_DIR = ROOT / "data" / "scenarios"
@@ -131,3 +131,9 @@ def orchestrator_with_agents():
             return stack.enter_context(TestClient(app))
 
         yield start
+
+@pytest.fixture
+def spans():
+    """Turn tracing on (request it before `orchestrator*`) and collect the finished spans."""
+    with capture_spans() as exporter:
+        yield exporter

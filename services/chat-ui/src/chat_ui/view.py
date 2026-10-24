@@ -30,6 +30,7 @@ class TurnView:
     procedure: str | None = None
     citations: list[str] = field(default_factory=list)
     consent: dict[str, Any] | None = None
+    trace_id: str | None = None
     # Answers of agents that handed the case over earlier in this turn: (agent, text).
     earlier: list[tuple[str, str]] = field(default_factory=list)
 
@@ -81,6 +82,8 @@ def apply_event(view: TurnView, event: Event) -> str | None:
             view.agent = data.get("agent")
             view.status_label = f"Routing to {view.agent}…"
             line = f"🧭 Routed to **{view.agent}** — {data.get('reason', '')}"
+        case EventType.STATUS_UPDATE if data.get("step") == "trace":
+            view.trace_id = data.get("trace_id")
         case EventType.STATUS_UPDATE if data.get("step") == "diagnosis_started":
             view.status_label = f"{event.source} is diagnosing…"
             line = f"🩺 **{event.source}** started"

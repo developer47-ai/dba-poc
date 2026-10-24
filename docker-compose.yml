@@ -17,6 +17,8 @@ x-service-env: &service-env
   SCHEDULING_MCP_URL: http://scheduling-mcp:8103/mcp
   INHOME_AGENT_URL: http://inhome-agent:8201
   ACCESS_PON_AGENT_URL: http://access-pon-agent:8202
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  JAEGER_UI_URL: http://localhost:${JAEGER_UI_PORT:-16686}
   ORCHESTRATOR_URL: http://orchestrator:8000
   DATABASE_URL: postgresql://${POSTGRES_USER:-dba}:${POSTGRES_PASSWORD:-dba_local_pw}@postgres:5432/${POSTGRES_DB:-dba}
   KNOWLEDGE_DIR: /app/knowledge
@@ -60,6 +62,7 @@ services:
       - "127.0.0.1:${ORCHESTRATOR_PORT:-8000}:8000"
     environment: *service-env
     depends_on:
+      jaeger: { condition: service_started }
       inhome-agent: { condition: service_healthy }
       access-pon-agent: { condition: service_healthy }
       network-simulator: { condition: service_healthy }
@@ -77,6 +80,7 @@ services:
     restart: unless-stopped
     environment: *service-env
     depends_on:
+      jaeger: { condition: service_started }
       network-diagnostics-mcp: { condition: service_healthy }
       knowledge-mcp: { condition: service_healthy }
       scheduling-mcp: { condition: service_healthy }
@@ -96,6 +100,7 @@ services:
     restart: unless-stopped
     environment: *service-env
     depends_on:
+      jaeger: { condition: service_started }
       network-diagnostics-mcp: { condition: service_healthy }
       knowledge-mcp: { condition: service_healthy }
       scheduling-mcp: { condition: service_healthy }
@@ -146,6 +151,15 @@ services:
       <<: *health
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8300/health', timeout=4)"]
 
+  # ---- Observability -------------------------------------------------------------------------
+  # Every chat turn is one distributed trace (orchestrator -> agents -> LLM and MCP calls).
+  # In-memory storage: traces are gone after a restart, which is fine for a demo.
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    container_name: dba-jaeger
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
   # ---- Knowledge (RAG) -----------------------------------------------------------------------
   # One-shot job: validate, chunk and embed knowledge/ into Postgres + pgvector (skips unchanged).
   kb-ingestion:

@@ -10,6 +10,8 @@
 3. Hand-over: customer C1001 (fiber, no light). The In-Home agent finds the problem is outside the
    home and hands over to the Access-PON agent, which follows SOP-PON-001 and asks approval to
    book an engineer; the approved booking must be confirmed by the scheduling MCP.
+4. Observability: that hand-over turn must be one distributed trace in Jaeger that spans the
+   orchestrator and both agents, with SOP steps, LLM calls and MCP tool calls.
 
     python scripts/e2e_check.py   # ORCHESTRATOR_URL / CHAT_UI_URL / KNOWLEDGE_URL override defaults
 """
@@ -26,6 +28,7 @@ from urllib.parse import urlencode, urlparse
 ORCHESTRATOR = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000").rstrip("/")
 CHAT_UI = os.getenv("CHAT_UI_URL", "http://localhost:8501").rstrip("/")
 KNOWLEDGE = os.getenv("KNOWLEDGE_URL", "http://localhost:8105").rstrip("/")
+JAEGER = os.getenv("JAEGER_URL", "http://localhost:16686").rstrip("/")
 WAIT_S = int(os.getenv("E2E_WAIT_S", "900"))
 CUSTOMER = os.getenv("E2E_CUSTOMER", "C1002")
 MESSAGE = "The customer reports they have no internet. Please diagnose the connection."
@@ -231,6 +234,7 @@ def run_handover(attempt: int) -> tuple[list[str], dict]:
 
     agents, procedures, tools, errors, consent = [], [], [], [], None
     finals: list[str] = []
+    trace_id = None
     for kind, data, at in stream_post(f"/v1/sessions/{session_id}/messages", {"message": MESSAGE}):
         if kind == "agent_handoff":
             agents.append(data.get("to_agent"))
@@ -239,6 +243,8 @@ def run_handover(attempt: int) -> tuple[list[str], dict]:
         elif kind == "status_update" and data.get("step") == "sop_selected":
             procedures.append(data["doc_id"])
             print(f"  [{at:6.1f}s] SOP   {data['doc_id']}", flush=True)
+        elif kind == "status_update" and data.get("step") == "trace":
+            trace_id = data.get("trace_id")
         elif kind == "status_update" and data.get("step") == "handover_unavailable":
             errors.append(f"hand-over not possible: {data.get('reason')}")
         elif kind == "tool_call" and data.get("status") == "started":
@@ -263,9 +269,11 @@ def run_handover(attempt: int) -> tuple[list[str], dict]:
     if not consent or consent.get("action") != "book_appointment":
         problems.append(f"expected an approval request for book_appointment, got {consent}")
     metrics = {"agents": agents, "procedures": procedures, "tools": tools,
-               "answers": finals, "booked": "–"}
+               "answers": finals, "booked": "–", "trace": {}}
     if problems:
         return problems, metrics
+    trace_problems, metrics["trace"] = check_trace(trace_id)
+    problems += trace_problems
 
     print("\n[expert] APPROVE the booking")
     body = {"consent_id": consent["consent_id"], "approved": True, "comment": "e2e check"}
@@ -293,6 +301,52 @@ def run_handover(attempt: int) -> tuple[list[str], dict]:
     return problems, metrics
 
 
+def check_trace(trace_id: str | None) -> tuple[list[str], dict]:
+    """The hand-over turn must be one trace in Jaeger across orchestrator and both agents."""
+    if not trace_id:
+        return ["the orchestrator did not report a trace id"], {}
+    expected = {"orchestrator", "inhome-agent", "access-pon-agent"}
+    deadline = time.monotonic() + 60
+    spans, services = [], set()
+    while time.monotonic() < deadline:
+        try:
+            data = request_json("GET", f"{JAEGER}/api/traces/{trace_id}")["data"][0]
+        except (urllib.error.URLError, KeyError, IndexError, ConnectionError):
+            data = None
+        if data:
+            names = {p: v["serviceName"] for p, v in data["processes"].items()}
+            spans = data["spans"]
+            services = {names[s["processID"]] for s in spans}
+            if expected <= services:
+                break
+        time.sleep(2)
+    operations = [s["operationName"] for s in spans]
+    summary = {"trace_id": trace_id, "spans": len(spans), "services": sorted(services),
+               "sop_steps": sum(o.startswith("sop.step") for o in operations),
+               "llm_calls": operations.count("llm.chat"),
+               "mcp_calls": operations.count("mcp.call_tool")}
+    problems = []
+    if not expected <= services:
+        problems.append(f"trace {trace_id} covers {sorted(services)}, expected {sorted(expected)}")
+    for what, key in (("SOP step", "sop_steps"), ("LLM call", "llm_calls"),
+                      ("MCP tool call", "mcp_calls")):
+        if not summary[key]:
+            problems.append(f"the trace has no {what} spans")
+    if not problems:
+        print(f"[trace] {trace_id} · {summary['spans']} spans · services {summary['services']} · "
+              f"{summary['sop_steps']} SOP steps · {summary['llm_calls']} LLM calls · "
+              f"{summary['mcp_calls']} MCP calls")
+    return problems, summary
+
+
+def trace_line(trace: dict) -> str:
+    if not trace.get("spans"):
+        return ""
+    return (f"**Trace in Jaeger** `{trace['trace_id']}`: {trace['spans']} spans across "
+            f"{', '.join(trace['services'])} · {trace['sop_steps']} SOP steps · "
+            f"{trace['llm_calls']} LLM calls · {trace['mcp_calls']} MCP tool calls\n\n")
+
+
 def write_handover_summary(metrics: dict, passed: bool) -> None:
     path = os.getenv("GITHUB_STEP_SUMMARY")
     if not path:
@@ -305,6 +359,7 @@ def write_handover_summary(metrics: dict, passed: bool) -> None:
             f" · SOPs: {' → '.join(metrics['procedures']) or '–'}\n\n"
             f"Tools: {', '.join(metrics['tools']) or '–'} · **booking after approval:** "
             f"{metrics['booked']}\n\n> {answers}\n\n"
+            + trace_line(metrics.get("trace") or {})
         )
 
 
@@ -395,6 +450,7 @@ def main() -> None:
     wait_for("orchestrator", f"{ORCHESTRATOR}/health")
     wait_for("chat-ui", f"{CHAT_UI}/_stcore/health")
     wait_for("knowledge-mcp", f"{KNOWLEDGE}/health")
+    wait_for("jaeger", f"{JAEGER}/")
     customers = [c["customer_id"] for c in request_json("GET", f"{ORCHESTRATOR}/v1/demo/customers")]
     print(f"[ready] scenario customers: {', '.join(customers)}")
 

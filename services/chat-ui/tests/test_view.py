@@ -175,3 +175,9 @@ def test_single_agent_answer_is_not_labelled_and_missing_agent_is_reported():
     assert lines == [
         "⚠️ No agent for this hand-over: no access agent in this demo for technology EOF"
     ]
+
+def test_trace_id_is_kept_for_the_jaeger_link_and_adds_no_log_line():
+    view, lines = play(
+        ev(EventType.STATUS_UPDATE, "orchestrator", step="trace", trace_id="ab" * 16),
+    )
+    assert view.trace_id == "ab" * 16 and lines == []

@@ -425,3 +425,46 @@ def test_consent_after_a_handover_is_sent_to_the_agent_that_asked(
     assert response.status_code == 200
     assert len(inhome_calls) == 1 and len(pon_calls) == 2
     assert pon_calls[1]["json"]["consent"]["approved"] is True
+
+def test_a_turn_is_one_trace_that_reaches_both_agents(
+    spans, fake_agent, orchestrator_with_agents
+):
+    inhome_url, inhome_calls = fake_agent(state={"sop": None, "handover": HANDOVER})
+    pon_url, pon_calls = fake_agent()
+    client = orchestrator_with_agents(
+        {"inhome-agent": inhome_url, "access-pon-agent": pon_url}, carrier_tech="GPON"
+    )
+    session_id = new_session(client, "C1001")
+
+    _, events = send(client, session_id, "no internet at all")
+
+    trace_id = next(e.data["trace_id"] for e in events if e.data.get("step") == "trace")
+    finished = spans.get_finished_spans()
+    (turn,) = [s for s in finished if s.name == "turn"]
+    assert format(turn.context.trace_id, "032x") == trace_id
+    assert turn.attributes["session.id"] == session_id and turn.attributes["customer.id"] == "C1001"
+    agent_calls = [s for s in finished if s.name == "agent.call"]
+    assert [s.attributes["agent.name"] for s in agent_calls] == ["inhome-agent", "access-pon-agent"]
+    assert all(s.parent.span_id == turn.context.span_id for s in agent_calls)
+    server = [s for s in finished if s.name.startswith("POST /v1/sessions/{session_id}/messages")]
+    assert server and server[0].context.trace_id == turn.context.trace_id
+    # The trace context travels in the HTTP request, so each agent continues the same trace.
+    for calls in (inhome_calls, pon_calls):
+        assert trace_id in calls[0]["headers"]["traceparent"]
+
+
+def test_an_unreachable_agent_marks_the_call_span_as_failed(spans, orchestrator):
+    client = orchestrator("http://127.0.0.1:9")
+    session_id = new_session(client)
+
+    send(client, session_id, "no internet")
+
+    (call,) = [s for s in spans.get_finished_spans() if s.name == "agent.call"]
+    assert call.status.status_code.name == "ERROR"
+
+
+def test_there_is_no_trace_event_when_tracing_is_off(fake_agent, orchestrator):
+    agent_url, _ = fake_agent()
+    client = orchestrator(agent_url)
+    _, events = send(client, new_session(client), "hello")
+    assert not [e for e in events if e.data.get("step") == "trace"]

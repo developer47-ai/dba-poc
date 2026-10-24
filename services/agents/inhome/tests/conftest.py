@@ -8,7 +8,7 @@ from knowledge_mcp.testing import run_test_knowledge_server
 from network_diagnostics_mcp import create_server
 from network_simulator import Network, create_app
 from poc_common.config import Config
-from poc_common.testing import run_app_in_thread
+from poc_common.testing import capture_spans, run_app_in_thread
 
 ROOT = Path(__file__).resolve().parents[4]
 SCENARIO_DIR = ROOT / "data" / "scenarios"
@@ -51,3 +51,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "llm" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture
+def spans():
+    with capture_spans() as exporter:
+        yield exporter

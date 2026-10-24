@@ -31,7 +31,7 @@ Everything runs on a laptop with `docker compose` — no cloud, no hosted LLM, n
 | Workflow execution | SOP procedures executed step by step as a deterministic graph |
 | Human-in-the-loop | Expert approves device reboots, Wi-Fi resets, engineer visits and swap orders |
 | Memory | Conversation checkpoints, session context and long-term customer memory |
-| Observability | LLM/agent traces in Langfuse, distributed traces in Jaeger |
+| Observability | One distributed trace per chat turn in Jaeger (OpenTelemetry): agents, SOP steps, LLM calls, MCP tool calls |
 | Local LLM | Qwen3 + bge-m3 served by Ollama (CPU or GPU) |
 
 ## Architecture
@@ -104,7 +104,7 @@ docker compose up -d            # first run builds the images and downloads ~3.5
 Open **http://localhost:8501**, pick scenario customer **C1002** in the sidebar, click
 **Start new session** and type *"The customer has no internet"*. The In-Home agent runs its
 diagnostic tools (visible live in the activity panel) and streams its answer word by word.
-**Reset customer's network** restores the scenario between demos.
+**Reset customer's network** restores the scenario between demos. Under every answer, **Open this turn's trace in Jaeger** shows what happened inside (see *Observability* below).
 
 Checks: `./scripts/smoke-test.sh` (Windows: `.\scripts\smoke-test.ps1`) tests the platform, and
 `python scripts/e2e_check.py` runs a full troubleshooting conversation through the API.
@@ -125,12 +125,29 @@ publishes the measured time to first tool call, first answer token and whole tur
 |---|---|---|
 | Chat UI (Streamlit) | 8501 | Expert console |
 | Orchestrator | 8000 | Sessions and streamed turns (`/docs` for the API) |
+| Jaeger UI | 16686 | Traces of every chat turn |
 | Knowledge MCP | 8105 | SOP search and navigation; try `/v1/search?q=LOS+light+red` |
 | Ollama | 11434 | Local LLM, OpenAI-compatible API at `/v1` |
 | PostgreSQL + pgvector | 5432 | Data and vector search (user `dba`, db `dba`) |
 | Valkey | 6379 | Cache and rate limits |
 
-In-Home agent, diagnostics MCP server and network simulator run on the internal Docker network only.
+The agents, MCP servers (except knowledge) and the network simulator run on the internal Docker network only.
+
+### Observability
+
+Every chat turn is **one OpenTelemetry trace** that follows the request across the services - the
+W3C 	raceparent header travels from the orchestrator to the agents - and is stored in
+[Jaeger](https://www.jaegertracing.io/) (http://localhost:16686, in memory, one small container).
+The trace shows:
+
+- 	urn and one gent.call per agent, so a hand-over In-Home → Access-PON is visible as two calls
+- sop.step S1 … spans with the SOP, step, tool and outcome the agent chose
+- llm.chat spans: model, time to first token, characters in and out, token counts
+- mcp.call_tool spans with the tool and its duration, and failures marked as errors
+
+Tracing is off when OTEL_EXPORTER_OTLP_ENDPOINT is not set. CI checks that the hand-over turn
+shows up in Jaeger across the orchestrator and both agents. The LLM-specific tool Langfuse needs six
+containers (ClickHouse, Redis, MinIO, ...), so it is left out of this laptop-sized POC.
 
 **Requirements:** a Docker-compatible runtime (Rancher Desktop, Docker Engine or Podman),
 16 GB RAM minimum (32 GB recommended), ~25 GB free disk. A GPU is optional.
@@ -175,7 +192,7 @@ Built step by step; each step is one pull request and ends in something you can 
 - [ ] **Step 12 — Memory**: Postgres checkpointer, session cache, customer memory
 
 ### Phase E — Operate & share → **v0.1.0 release**
-- [ ] **Step 13 — Observability**: Langfuse, OpenTelemetry, Jaeger, feedback scores
+- [x] **Step 13 — Observability** (minimal): OpenTelemetry traces in Jaeger, one trace per chat turn across orchestrator and agents (SOP steps, LLM calls, MCP tool calls), link from the chat UI, verified in CI. Langfuse and feedback scores are left out (Langfuse v4 needs six containers).
 - [ ] **Step 14 — Guardrails & identity**: input guardrails, scope gate, optional Traefik + Keycloak
 - [ ] **Step 15 — Evaluation & CI**: golden sets, RAG metrics, GitHub Actions
 - [ ] **Step 16 — Visitor packaging**: one-command setup, demo script, screenshots, release
@@ -208,7 +225,7 @@ Fictional customers live in [`data/scenarios/`](data/scenarios); the
 | Database & vectors | PostgreSQL + pgvector | PostgreSQL |
 | Cache | Valkey | BSD-3 |
 | Document processing | Docling | MIT |
-| Observability | Langfuse, OpenTelemetry, Jaeger | MIT / Apache-2.0 |
+| Observability | OpenTelemetry, Jaeger (Langfuse optional later) | Apache-2.0 |
 | Gateway & identity (optional) | Traefik, Keycloak | MIT / Apache-2.0 |
 
 ## Contributing

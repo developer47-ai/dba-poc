@@ -9,6 +9,7 @@ from orchestrator.sessions import Session
 from poc_common.events import AgentRequest, ChatTurn, ConsentResponse, Event, EventType
 from poc_common.logging import CORRELATION_HEADER
 from poc_common.sse import iter_sse_events
+from poc_common.tracing import current_trace_id, span
 
 SOURCE = "orchestrator"
 
@@ -18,22 +19,29 @@ class AgentUnavailableError(RuntimeError):
 
 
 async def stream_agent(
-    client: httpx.AsyncClient, url: str, request: AgentRequest, correlation_id: str
+    client: httpx.AsyncClient, url: str, request: AgentRequest, correlation_id: str,
+    agent: str = "",
 ) -> AsyncIterator[Event]:
-    try:
-        async with client.stream(
-            "POST",
-            f"{url}/v1/diagnose",
-            json=request.model_dump(),
-            headers={CORRELATION_HEADER: correlation_id, "Accept": "text/event-stream"},
-        ) as response:
-            if response.status_code >= 400:
-                await response.aread()
-                raise AgentUnavailableError(f"HTTP {response.status_code}: {response.text[:200]}")
-            async for event in iter_sse_events(response):
-                yield event
-    except httpx.HTTPError as exc:
-        raise AgentUnavailableError(str(exc) or type(exc).__name__) from exc
+    # The HTTP call below is traced by the httpx instrumentation and carries the trace context,
+    # so the agent's own spans appear as children of this one.
+    with span("agent.call", {"agent.name": agent, "agent.url": url,
+                             "agent.resumes_state": request.state is not None,
+                             "agent.consent": request.consent is not None}):
+        try:
+            async with client.stream(
+                "POST",
+                f"{url}/v1/diagnose",
+                json=request.model_dump(),
+                headers={CORRELATION_HEADER: correlation_id, "Accept": "text/event-stream"},
+            ) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise AgentUnavailableError(
+                        f"HTTP {response.status_code}: {response.text[:200]}")
+                async for event in iter_sse_events(response):
+                    yield event
+        except httpx.HTTPError as exc:
+            raise AgentUnavailableError(str(exc) or type(exc).__name__) from exc
 
 
 MAX_HANDOVERS = 2
@@ -48,6 +56,31 @@ def _handover_message(source: str, handover: dict, message: str) -> str:
 
 
 async def run_turn(
+    session: Session,
+    message: str,
+    *,
+    router: Router,
+    client: httpx.AsyncClient,
+    correlation_id: str,
+    consent: ConsentResponse | None = None,
+) -> AsyncIterator[Event]:
+    """One turn as one trace: everything the agents and tools do hangs below the `turn` span."""
+    with span("turn", {"session.id": session.session_id, "customer.id": session.customer_id,
+                       "correlation.id": correlation_id,
+                       "turn.kind": "approval" if consent else "message"}):
+        trace_id = current_trace_id()
+        if trace_id:
+            # Lets the chat UI link to this turn's trace.
+            yield Event(type=EventType.STATUS_UPDATE, source=SOURCE, session_id=session.session_id,
+                        correlation_id=correlation_id, data={"step": "trace", "trace_id": trace_id})
+        async for item in _run_turn(
+            session, message, router=router, client=client, correlation_id=correlation_id,
+            consent=consent,
+        ):
+            yield item
+
+
+async def _run_turn(
     session: Session,
     message: str,
     *,
@@ -84,7 +117,7 @@ async def run_turn(
             )
             handover = None
             async for item in stream_agent(
-                client, router.registry.url(agent), request, correlation_id
+                client, router.registry.url(agent), request, correlation_id, agent
             ):
                 if item.type is EventType.DONE:
                     continue
