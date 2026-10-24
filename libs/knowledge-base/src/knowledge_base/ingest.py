@@ -11,6 +11,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+from knowledge_base.documents import UPLOAD_PREFIX
 from knowledge_base.embedding import Embedder
 from knowledge_base.store import KnowledgeStore
 from sop_kit import SopDocument, chunk_document, load_library, validate_library
@@ -72,7 +73,10 @@ def ingest_library(
         (report.updated if doc.doc_id in existing else report.added).append(doc.doc_id)
         logger.info("ingested %s v%s (%d chunks)", doc.doc_id, doc.version, len(chunks))
 
-    report.removed = sorted(set(existing) - {d.doc_id for d in active})
+    # Uploaded documents are not part of the library; only library documents can be removed here.
+    uploads = {d["doc_id"] for d in store.list_documents()
+               if d.get("source", "").startswith(UPLOAD_PREFIX)}
+    report.removed = sorted(set(existing) - {d.doc_id for d in active} - uploads)
     store.delete(report.removed)
     return report
 

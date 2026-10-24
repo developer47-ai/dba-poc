@@ -169,7 +169,7 @@ class MemoryStore(KnowledgeStore):
     def list_documents(self) -> list[dict[str, Any]]:
         return [
             {"doc_id": d.doc_id, "title": d.title, "version": d.version, "kind": d.kind.value,
-             "agent_scope": d.agent_scope, "chunks": sum(
+             "source": d.source, "agent_scope": d.agent_scope, "chunks": sum(
                  1 for c in self._chunks.values() if c.doc_id == d.doc_id)}
             for d in sorted(self._docs.values(), key=lambda d: d.doc_id)
         ]

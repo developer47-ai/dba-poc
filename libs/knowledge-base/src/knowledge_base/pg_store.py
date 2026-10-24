@@ -183,7 +183,7 @@ class PgVectorStore(KnowledgeStore):
     def list_documents(self) -> list[dict[str, Any]]:
         with self._pool.connection() as conn:
             rows = conn.execute(
-                f"SELECT d.doc_id, d.title, d.version, d.kind, "
+                f"SELECT d.doc_id, d.title, d.version, d.kind, d.source, "
                 f"d.metadata->'agent_scope' AS agent_scope, count(c.chunk_id) AS chunks "
                 f"FROM {self.schema}.document d LEFT JOIN {self.schema}.chunk c USING (doc_id) "
                 f"GROUP BY d.doc_id ORDER BY d.doc_id"

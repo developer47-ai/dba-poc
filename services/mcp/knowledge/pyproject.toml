@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
   "anyio>=4",
   "mcp>=1.9,<2",
+  "python-multipart>=0.0.9",
   "knowledge-base",
   "poc-common",
   "sop-kit",

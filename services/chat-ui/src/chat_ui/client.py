@@ -69,6 +69,41 @@ class OrchestratorClient:
             raise OrchestratorError(f"the connection to the orchestrator broke ({exc})") from exc
 
 
+class KnowledgeClient:
+    """Adds documents to the knowledge base (PDF, Word ... are converted by Docling)."""
+
+    def __init__(self, base_url: str, *, http: httpx.Client | None = None) -> None:
+        # The first conversion of a PDF can take a while on a CPU.
+        self._http = http or httpx.Client(
+            base_url=base_url.rstrip("/"), timeout=httpx.Timeout(10.0, read=600.0)
+        )
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            response = self._http.request(method, path, **kwargs)
+        except httpx.HTTPError as exc:
+            raise OrchestratorError(f"cannot reach the knowledge service ({exc})") from exc
+        if response.status_code >= 400:
+            raise OrchestratorError(_detail(response))
+        return response.json()
+
+    def upload(
+        self, filename: str, content: bytes, title: str | None = None,
+        agents: list[str] | None = None,
+    ) -> dict[str, Any]:
+        data = {"title": title or "", "agents": ",".join(agents or [])}
+        return self._request(
+            "POST", "/v1/documents/upload", files={"file": (filename, content)}, data=data
+        )
+
+    def uploaded_documents(self) -> list[dict[str, Any]]:
+        documents = self._request("GET", "/v1/documents")
+        return [d for d in documents if str(d.get("source", "")).startswith("upload:")]
+
+    def remove(self, doc_id: str) -> dict[str, Any]:
+        return self._request("DELETE", f"/v1/documents/{doc_id}")
+
+
 def _detail(response: httpx.Response) -> str:
     try:
         detail = response.json().get("detail", response.text)

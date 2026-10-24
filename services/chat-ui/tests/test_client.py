@@ -1,6 +1,7 @@
+import httpx
 import pytest
 
-from chat_ui.client import OrchestratorClient, OrchestratorError
+from chat_ui.client import KnowledgeClient, OrchestratorClient, OrchestratorError
 from poc_common.events import EventType
 
 
@@ -65,3 +66,42 @@ def test_earlier_cases_can_be_listed_and_reopened(orchestrator_url, answer):
     assert client.list_sessions("C0000") == []
     with pytest.raises(OrchestratorError, match="HTTP 404"):
         client.get_session("missing")
+
+def knowledge_client(handler) -> KnowledgeClient:
+    return KnowledgeClient("http://kb", http=httpx.Client(
+        base_url="http://kb", transport=httpx.MockTransport(handler)))
+
+
+def test_a_document_is_uploaded_with_its_title_and_listed_among_the_uploads():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            seen["body"] = request.read()
+            return httpx.Response(201, json={"doc_id": "KB-UPL-001", "version": "1.0"})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"deleted": request.url.path.rsplit("/", 1)[1]})
+        return httpx.Response(200, json=[
+            {"doc_id": "SOP-IH-001", "source": "knowledge/sop/a.md"},
+            {"doc_id": "KB-UPL-001", "source": "upload:guide.docx"},
+        ])
+
+    client = knowledge_client(handler)
+
+    assert client.upload("guide.docx", b"PK", title="ONT guide")["doc_id"] == "KB-UPL-001"
+    assert b'filename="guide.docx"' in seen["body"] and b"ONT guide" in seen["body"]
+    assert [d["doc_id"] for d in client.uploaded_documents()] == ["KB-UPL-001"]
+    assert client.remove("KB-UPL-001") == {"deleted": "KB-UPL-001"}
+
+
+def test_upload_problems_are_readable():
+    refusal = {"detail": "the document processor is not reachable"}
+    client = knowledge_client(lambda request: httpx.Response(502, json=refusal))
+    with pytest.raises(OrchestratorError, match="HTTP 502: the document processor"):
+        client.upload("a.pdf", b"x")
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(OrchestratorError, match="cannot reach the knowledge service"):
+        knowledge_client(down).uploaded_documents()

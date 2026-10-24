@@ -27,7 +27,7 @@ Everything runs on a laptop with `docker compose` — no cloud, no hosted LLM, n
 | MCP | Five MCP servers (diagnostics, installed base, scheduling, ticketing, knowledge) over streamable HTTP |
 | Tool calling | Agents call diagnostic and fulfilment tools on a simulated network |
 | RAG & knowledge search | Hybrid (keyword + vector) search over SOP documents with citations |
-| Document processing | SOPs (Markdown / PDF / DOCX) parsed and chunked with Docling |
+| Document processing | PDF / Word / PowerPoint files converted to Markdown by Docling, indexed and cited like any SOP; SOPs themselves are validated Markdown |
 | Workflow execution | SOP procedures executed step by step as a deterministic graph |
 | Human-in-the-loop | Expert approves device reboots, Wi-Fi resets, engineer visits and swap orders |
 | Memory | Conversation checkpoints, session context and long-term customer memory |
@@ -82,7 +82,7 @@ dba-poc/
 │   ├── agents/                       # inhome | access-pon | access-p2p | access-copper
 │   ├── mcp/                          # network-diagnostics | installed-base | scheduling | ticketing | knowledge
 │   ├── network-simulator/            # Stateful fake network with scenario customers
-│   └── kb-ingestion/                 # Docling SOP ingestion worker
+│   └── kb-ingestion/                 # SOP library ingestion worker (documents: knowledge-mcp + Docling)
 ├── libs/poc-common/                  # Shared: settings, LLM factory, MCP client, events, logging
 ├── knowledge/sop/                    # SOP documents (source of truth for RAG)
 ├── data/scenarios/                   # Fictional customers and fault scenarios
@@ -126,12 +126,34 @@ publishes the measured time to first tool call, first answer token and whole tur
 | Chat UI (Streamlit) | 8501 | Expert console |
 | Orchestrator | 8000 | Sessions and streamed turns (`/docs` for the API) |
 | Jaeger UI | 16686 | Traces of every chat turn |
+| Docling | 5001 | Document conversion API (/docs) |
 | Knowledge MCP | 8105 | SOP search and navigation; try `/v1/search?q=LOS+light+red` |
 | Ollama | 11434 | Local LLM, OpenAI-compatible API at `/v1` |
 | PostgreSQL + pgvector | 5432 | Data and vector search (user `dba`, db `dba`) |
 | Valkey | 6379 | Cache and rate limits |
 
 The agents, MCP servers (except knowledge) and the network simulator run on the internal Docker network only.
+
+### Document processing
+
+Open **Add a document to the knowledge base** in the chat UI sidebar and upload a PDF, Word or
+PowerPoint file (samples: [data/documents/](data/documents)). The pipeline:
+
+1. knowledge-mcp sends the file to the **Docling** container (POST /v1/convert/file, OCR off) and
+   gets Markdown back - Word keeps headings and tables, PDFs are layout-analysed.
+2. The Markdown is split into sections (heading path as the section title), stored as a
+   **reference** document KB-UPL-nnn with source = upload:<file>, chunked, embedded with bge-m3
+   and indexed with the rest of the knowledge base. Uploading the same file again makes a new
+   version of the same document.
+3. Agents find it with the normal search_knowledge tool and cite it, e.g.
+   *KB-UPL-001 v1.0 › Factory reset*.
+
+Safety: an upload can only become a *reference*, never a procedure, so an unreviewed file can
+inform an answer but cannot tell an agent which action to run. Uploading and removing are plain HTTP
+routes, not MCP tools, so agents cannot change the knowledge base. The library sync (kb-ingestion)
+leaves uploads alone. CI converts the sample Word and PDF files through the real Docling container
+and checks that a chat question about the Word guide cites it. Docling is the official
+docling-serve-cpu image (about 4 GB), so the first docker compose up takes longer.
 
 ### Memory
 
@@ -194,6 +216,7 @@ Built step by step; each step is one pull request and ends in something you can 
 - [x] **Step 8 — SOP-guided agents** (follow steps, cite `sop_id/step_id`, stop for approval, no-SOP fallback)
 
 ### Phase D — Full multi-agent platform → **M3: all scenarios**
+- [x] **Document processing (Docling)**: PDF / Word / PowerPoint upload in the chat UI, converted by the Docling container, searchable and cited as reference documents; verified in CI with the real container.
 - [ ] **Step 9 — `installed-base-mcp` + `quickscan-service`**
 - [x] **Step 10 — Access-PON agent + agent hand-over** (minimal): the In-Home agent hands a fiber case over to the Access-PON agent (SOP-PON-001), chosen by the customer's carrier technology; the Access-PON agent proposes an engineer slot and books it only after approval (`scheduling-mcp`). P2P / Copper agents are left out of this demo; the orchestrator reports a hand-over without an agent.
 - [x] **Step 11 — Human-in-the-loop** (minimal): Approve / Decline buttons, audited decisions, the approved action really runs and the SOP continues; shown on two scenarios (C1002 reboot, C1003 Wi-Fi reset) plus the decline path, and the engineer booking of C1001. `ticketing-mcp` is left for later.

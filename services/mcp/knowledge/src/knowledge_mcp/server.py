@@ -7,7 +7,9 @@ model) decides which step comes next.
 
 import logging
 import os
-from typing import Any
+import threading
+import time
+from typing import Any, Protocol
 
 import anyio
 from mcp.server.fastmcp import FastMCP
@@ -15,17 +17,36 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from knowledge_base import Filters, HybridRetriever
+from knowledge_base import (
+    ConversionError,
+    DocumentInvalidError,
+    Filters,
+    HybridRetriever,
+    build_reference,
+    ingest_document,
+    plan_upload,
+)
+from knowledge_base.docling import SUPPORTED
+from knowledge_base.documents import UPLOAD_PREFIX
 from poc_common.config import get_config
 from poc_common.logging import setup_logging
 from sop_kit import NavigationError, SopDocument, get_step, next_step, procedure_view
 
 logger = logging.getLogger(__name__)
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
+
+class Converter(Protocol):
+    def convert(self, filename: str, content: bytes) -> str: ...
 
 
 def create_server(
-    retriever: HybridRetriever, *, host: str = "127.0.0.1", port: int = 8105
+    retriever: HybridRetriever,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8105,
+    converter: Converter | None = None,
 ) -> FastMCP:
     store = retriever.store
     # Binding to 0.0.0.0 (containers) also disables FastMCP's localhost-only Host header check.
@@ -111,6 +132,73 @@ def create_server(
     async def documents(_: Request) -> JSONResponse:
         return JSONResponse(await run(store.list_documents))
 
+    upload_lock = threading.Lock()
+
+    def add_document(filename: str, content: bytes, title: str | None, agents: list[str] | None):
+        """Convert (Word, PDF ... through Docling; Markdown is used as it is), then ingest."""
+        started = time.monotonic()
+        if filename.lower().endswith(".md"):
+            markdown, converted_by = content.decode("utf-8", errors="replace"), "as-is"
+        elif converter is None:
+            raise ConversionError("no document processor is configured")
+        else:
+            markdown, converted_by = converter.convert(filename, content), "docling"
+        converted_s = time.monotonic() - started
+        with upload_lock:  # one upload at a time, so ids and versions cannot clash
+            doc_id, version = plan_upload(store.list_documents(), filename)
+            doc = build_reference(
+                markdown, doc_id=doc_id, version=version, filename=filename, title=title,
+                agents=agents,
+            )
+            chunks = ingest_document(doc, store, retriever.embedder)
+        logger.info("uploaded %s as %s v%s (%d chunks)", filename, doc_id, version, chunks)
+        return {
+            "doc_id": doc.doc_id, "version": doc.version, "title": doc.title, "kind": "reference",
+            "source": doc.source, "sections": len(doc.sections), "chunks": chunks,
+            "characters": len(markdown), "converted_by": converted_by,
+            "convert_s": round(converted_s, 1), "total_s": round(time.monotonic() - started, 1),
+        }
+
+    @server.custom_route("/v1/documents/upload", methods=["POST"])
+    async def upload(request: Request) -> JSONResponse:
+        """Add a document (PDF, DOCX, PPTX, HTML or Markdown) as a searchable reference.
+
+        Not an MCP tool: agents can read the knowledge base but never change it.
+        """
+        form = await request.form()
+        file = form.get("file")
+        if file is None or not hasattr(file, "read"):
+            return JSONResponse({"detail": "send the document as the form field 'file'"}, 400)
+        filename = os.path.basename(file.filename or "").strip()
+        extension = os.path.splitext(filename)[1].lower()
+        if extension not in SUPPORTED:
+            return JSONResponse(
+                {"detail": f"unsupported file type '{extension}'; use {sorted(SUPPORTED)}"}, 415)
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
+            return JSONResponse({"detail": "the file is larger than 15 MB"}, 413)
+        agents = [a.strip() for a in str(form.get("agents") or "").split(",") if a.strip()]
+        try:
+            result = await run(
+                add_document, filename, content, str(form.get("title") or "").strip() or None,
+                agents or None)
+        except ConversionError as exc:
+            return JSONResponse({"detail": str(exc)}, 502)
+        except DocumentInvalidError as exc:
+            return JSONResponse({"detail": str(exc)}, 422)
+        return JSONResponse(result, 201)
+
+    @server.custom_route("/v1/documents/{doc_id}", methods=["DELETE"])
+    async def delete_upload(request: Request) -> JSONResponse:
+        doc_id = request.path_params["doc_id"].strip().upper()
+        doc = await run(store.get_document, doc_id)
+        if doc is None:
+            return JSONResponse({"detail": f"unknown document '{doc_id}'"}, 404)
+        if not doc.source.startswith(UPLOAD_PREFIX):
+            return JSONResponse({"detail": "only uploaded documents can be removed here"}, 403)
+        await run(store.delete, [doc_id])
+        return JSONResponse({"deleted": doc_id})
+
     @server.custom_route("/v1/search", methods=["GET"])
     async def search(request: Request) -> JSONResponse:
         """Plain HTTP search for demos and end-to-end checks: /v1/search?q=...&agent=..."""
@@ -128,7 +216,7 @@ def create_server(
 
 
 def main() -> None:
-    from knowledge_base import OllamaEmbedder
+    from knowledge_base import DoclingClient, OllamaEmbedder
     from knowledge_base.pg_store import PgVectorStore
 
     config = get_config()
@@ -142,6 +230,7 @@ def main() -> None:
     )
     port = int(os.getenv("MCP_PORT", "8105"))
     logger.info("starting knowledge MCP on port %s", port)
-    create_server(retriever, host=os.getenv("MCP_HOST", "0.0.0.0"), port=port).run(
-        transport="streamable-http"
-    )
+    create_server(
+        retriever, host=os.getenv("MCP_HOST", "0.0.0.0"), port=port,
+        converter=DoclingClient(config.docling_url),
+    ).run(transport="streamable-http")

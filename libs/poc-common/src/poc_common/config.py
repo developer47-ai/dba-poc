@@ -45,6 +45,9 @@ class Config(BaseSettings):
     database_url: str = "postgresql://dba:dba_local_pw@localhost:5432/dba"
     valkey_url: str = "redis://localhost:6379/0"
 
+    # Document processing: the Docling container turns PDF / Word files into Markdown.
+    docling_url: str = "http://localhost:5001"
+
     # Knowledge base (RAG)
     knowledge_dir: str = "knowledge"
     embed_dimensions: int = 1024  # bge-m3

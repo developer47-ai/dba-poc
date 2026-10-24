@@ -10,9 +10,11 @@
 3. Hand-over: customer C1001 (fiber, no light). The In-Home agent finds the problem is outside the
    home and hands over to the Access-PON agent, which follows SOP-PON-001 and asks approval to
    book an engineer; the approved booking must be confirmed by the scheduling MCP.
-4. Memory: after the orchestrator container is restarted (E2E_RESTART=1), the hand-over case must
+4. Document processing: a Word file and a PDF are converted by the Docling container, become
+   searchable reference documents, and a chat question about the Word guide must cite it.
+5. Memory: after the orchestrator container is restarted (E2E_RESTART=1), the hand-over case must
    still be there, complete, and listed among the customer's earlier cases.
-5. Observability: that hand-over turn must be one distributed trace in Jaeger that spans the
+6. Observability: that hand-over turn must be one distributed trace in Jaeger that spans the
    orchestrator and both agents, with SOP steps, LLM calls and MCP tool calls.
 
     python scripts/e2e_check.py   # ORCHESTRATOR_URL / CHAT_UI_URL / KNOWLEDGE_URL override defaults
@@ -26,12 +28,16 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
+from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 ORCHESTRATOR = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000").rstrip("/")
 CHAT_UI = os.getenv("CHAT_UI_URL", "http://localhost:8501").rstrip("/")
 KNOWLEDGE = os.getenv("KNOWLEDGE_URL", "http://localhost:8105").rstrip("/")
 JAEGER = os.getenv("JAEGER_URL", "http://localhost:16686").rstrip("/")
+DOCLING = os.getenv("DOCLING_URL", "http://localhost:5001").rstrip("/")
+DOCUMENTS = Path(__file__).resolve().parents[1] / "data" / "documents"
 WAIT_S = int(os.getenv("E2E_WAIT_S", "900"))
 CUSTOMER = os.getenv("E2E_CUSTOMER", "C1002")
 MESSAGE = "The customer reports they have no internet. Please diagnose the connection."
@@ -351,6 +357,95 @@ def trace_line(trace: dict) -> str:
             f"{trace['llm_calls']} LLM calls · {trace['mcp_calls']} MCP tool calls\n\n")
 
 
+# (file, a question only that document answers, text its best passage must contain)
+DOCUMENT_CHECKS = [
+    ("FibreLink-ONT-100-quick-guide.docx",
+     "How long do I hold the reset button of the FibreLink ONT-100?", "12 seconds"),
+    ("FibreLink-ONT-200-installation-sheet.pdf",
+     "What does a blinking green PON light on the ONT-200 mean?", "Ranging"),
+]
+DOCUMENT_QUESTION = "How long do I hold the reset button to factory reset the FibreLink ONT-100?"
+
+
+def upload_document(path: Path) -> dict:
+    """POST the file to the knowledge service (multipart, stdlib only)."""
+    boundary = uuid.uuid4().hex
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+            f"filename=\"{path.name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            ).encode() + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        f"{KNOWLEDGE}/v1/documents/upload", data=body, method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=900) as response:  # the first PDF is slow on a CPU
+            return json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"[fail] upload of {path.name} returned HTTP {exc.code}: {exc.read()[:300]!r}")
+
+
+def check_documents() -> tuple[list[str], list[dict]]:
+    """Docling converts real files; the result must be searchable like any other knowledge."""
+    wait_for("docling", f"{DOCLING}/health")
+    problems, rows = [], []
+    for filename, question, expected_text in DOCUMENT_CHECKS:
+        added = upload_document(DOCUMENTS / filename)
+        hits = search_knowledge(question, "access-pon")
+        top = hits[0] if hits else {}
+        ok = top.get("doc_id") == added["doc_id"] and expected_text in top.get("text", "")
+        rows.append({**added, "file": filename, "question": question, "ok": ok,
+                     "citation": top.get("citation")})
+        print(f"  [{'ok' if ok else 'FAIL'}] {filename} -> {added['doc_id']} "
+              f"({added['sections']} sections, {added['chunks']} chunks, converted by "
+              f"{added['converted_by']} in {added['convert_s']} s); {question!r} -> "
+              f"{top.get('citation')}")
+        if added["converted_by"] != "docling" or added["sections"] < 2:
+            problems.append(f"{filename} was not converted by Docling into sections: {added}")
+        if not ok:
+            problems.append(f"{question!r} found {top.get('doc_id')}, expected {added['doc_id']} "
+                            f"containing {expected_text!r}")
+    return problems, rows
+
+
+def ask_about_uploaded_document(doc_id: str) -> tuple[list[str], str]:
+    """The expert asks a question only the uploaded Word guide answers; the agent must cite it."""
+    session = request_json("POST", f"{ORCHESTRATOR}/v1/sessions",
+                           {"customer_id": "C1006", "expert_name": "e2e"})
+    print(f"\n[expert] {DOCUMENT_QUESTION}")
+    cited, answer, errors = [], "", []
+    path = f"/v1/sessions/{session['session_id']}/messages"
+    for kind, data, _at in stream_post(path, {"message": DOCUMENT_QUESTION}):
+        if kind == "knowledge_article":
+            cited.append(data.get("doc_id"))
+        elif kind == "agent_message" and data.get("final"):
+            answer = data.get("text", "")
+        elif kind == "error":
+            errors.append(data.get("message", ""))
+    print(f"  cited {cited}\n  answer: {answer[:300]}")
+    problems = [f"error: {e}" for e in errors]
+    if doc_id not in cited:
+        problems.append(f"the answer did not cite the uploaded document {doc_id}: {cited}")
+    if not answer.strip():
+        problems.append("no answer to the question about the uploaded document")
+    return problems, answer
+
+
+def write_documents_summary(rows: list[dict], answer: str, passed: bool) -> None:
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    lines = [f"### Document processing (Docling) {'✅' if passed else '❌'}\n",
+             "| File | Stored as | Sections | Chunks | Converted in | Question → best passage |",
+             "|---|---|---|---|---|---|"]
+    for row in rows:
+        lines.append(f"| {row['file']} | {row['doc_id']} v{row['version']} | {row['sections']} | "
+                     f"{row['chunks']} | {row['convert_s']} s | {row['question']} → "
+                     f"{row['citation']} {'✅' if row['ok'] else '❌'} |")
+    lines.append(f"\n> Question in the chat: *{DOCUMENT_QUESTION}*  \n"
+                 f"> {answer.replace(chr(10), ' ')[:500]}\n")
+    with open(path, "a", encoding="utf-8") as summary:
+        summary.write("\n".join(lines) + "\n\n")
+
+
 def check_memory_after_restart(session_id: str, customer_id: str) -> list[str]:
     """Sessions live in Postgres: a restarted orchestrator must still know the whole case."""
     before = session_state(session_id)
@@ -485,6 +580,22 @@ def main() -> None:
     if knowledge_problems:
         sys.exit(f"\nE2E FAILED (knowledge): {'; '.join(knowledge_problems)}")
 
+    print("\n[documents] Docling conversion and search")
+    document_problems, document_rows = check_documents()
+    if document_problems:
+        write_documents_summary(document_rows, "", passed=False)
+        sys.exit(f"\nE2E FAILED (documents): {'; '.join(document_problems)}")
+    uploaded = document_rows[0]["doc_id"]
+    answer, chat_problems = "", []
+    for attempt in range(1, ATTEMPTS + 1):
+        chat_problems, answer = ask_about_uploaded_document(uploaded)
+        if not chat_problems:
+            break
+        print(f"[attempt {attempt}] problems: {'; '.join(chat_problems)}")
+    write_documents_summary(document_rows, answer, passed=not chat_problems)
+    if chat_problems:
+        sys.exit(f"\nE2E FAILED (document question): {'; '.join(chat_problems)}")
+
     # Small local models are not fully deterministic, so each scenario gets one retry.
     results: list[dict] = []
     # The decline path is covered by the agent and orchestrator tests; here every minute counts.
@@ -509,8 +620,8 @@ def main() -> None:
         problems = check_memory_after_restart(handover["session_id"], handover["customer_id"])
         if problems:
             sys.exit(f"\nE2E FAILED (memory): {'; '.join(problems)}")
-    print("\nE2E PASSED - knowledge search, SOP-guided troubleshooting, approval and the "
-          "multi-agent hand-over work end to end.")
+    print("\nE2E PASSED - knowledge search, Docling document processing, SOP-guided "
+          "troubleshooting, approval, the multi-agent hand-over and memory work end to end.")
 
 
 if __name__ == "__main__":

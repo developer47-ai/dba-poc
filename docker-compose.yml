@@ -14,6 +14,8 @@ x-service-env: &service-env
   NETWORK_SIMULATOR_URL: http://network-simulator:8300
   DIAGNOSTICS_MCP_URL: http://network-diagnostics-mcp:8101/mcp
   KNOWLEDGE_MCP_URL: http://knowledge-mcp:8105/mcp
+  KNOWLEDGE_URL: http://knowledge-mcp:8105
+  DOCLING_URL: http://docling:5001
   SCHEDULING_MCP_URL: http://scheduling-mcp:8103/mcp
   INHOME_AGENT_URL: http://inhome-agent:8201
   ACCESS_PON_AGENT_URL: http://access-pon-agent:8202
@@ -162,6 +164,15 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+  # ---- Document processing -------------------------------------------------------------------
+  # Docling (official docling-serve image, CPU): PDF / Word / PowerPoint -> Markdown, which the
+  # knowledge service turns into searchable, citable reference documents.
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.38.1
+    container_name: dba-docling
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DOCLING_PORT:-5001}:5001"
   # ---- Knowledge (RAG) -----------------------------------------------------------------------
   # One-shot job: validate, chunk and embed knowledge/ into Postgres + pgvector (skips unchanged).
   kb-ingestion:

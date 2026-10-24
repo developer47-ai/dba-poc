@@ -4,11 +4,13 @@ import os
 
 import streamlit as st
 
-from chat_ui.client import OrchestratorClient, OrchestratorError
+from chat_ui.client import KnowledgeClient, OrchestratorClient, OrchestratorError
 from chat_ui.view import TurnView, apply_event
 from poc_common.events import EventType
 
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
+KNOWLEDGE_URL = os.getenv("KNOWLEDGE_URL", "http://localhost:8105")
+UPLOAD_TYPES = ["pdf", "docx", "pptx", "html", "md"]
 JAEGER_UI_URL = os.getenv("JAEGER_UI_URL", "http://localhost:16686").rstrip("/")
 TEXT_EVENTS = {EventType.AGENT_MESSAGE_DELTA, EventType.AGENT_MESSAGE}
 
@@ -21,10 +23,19 @@ def get_client(url: str) -> OrchestratorClient:
 
 
 client = get_client(ORCHESTRATOR_URL)
+
+
+@st.cache_resource
+def get_knowledge(url: str) -> KnowledgeClient:
+    return KnowledgeClient(url)
+
+
+knowledge = get_knowledge(KNOWLEDGE_URL)
 state = st.session_state
 state.setdefault("session", None)
 state.setdefault("messages", [])
 state.setdefault("pending_consent", None)
+state.setdefault("upload_round", 0)
 
 
 def customer_label(customer: dict) -> str:
@@ -52,6 +63,45 @@ def case_label(case: dict) -> str:
     waiting = " · ⏳ approval pending" if case["awaiting_approval"] else ""
     question = case["first_question"] or "(no messages)"
     return f"{when} · {case['turns']} turn(s){waiting} · {question[:40]}"
+
+
+def render_documents() -> None:
+    """Document processing: Docling converts the file, then it is searchable like any SOP."""
+    with st.expander("📄 Add a document to the knowledge base"):
+        st.caption(
+            "PDF, Word, PowerPoint, HTML or Markdown. The Docling container converts the file; "
+            "the agents can then answer from it and cite it (as a reference, never as a "
+            "procedure)."
+        )
+        file = st.file_uploader("Document", type=UPLOAD_TYPES, key=f"upload-{state.upload_round}")
+        title = st.text_input("Title (optional)", key=f"title-{state.upload_round}")
+        if file and st.button("Process and add", use_container_width=True):
+            with st.spinner("Converting and indexing… (a PDF can take a minute)"):
+                try:
+                    result = knowledge.upload(file.name, file.getvalue(), title.strip() or None)
+                except OrchestratorError as exc:
+                    st.error(str(exc))
+                else:
+                    state.upload_round += 1
+                    state.upload_result = result
+                    st.rerun()
+        result = state.pop("upload_result", None)
+        if result:
+            st.success(
+                f"**{result['doc_id']}** v{result['version']} · {result['title']}  \n"
+                f"{result['sections']} sections, {result['chunks']} searchable chunks "
+                f"({result['converted_by']}, {result['total_s']} s)"
+            )
+        try:
+            added = knowledge.uploaded_documents()
+        except OrchestratorError:
+            added = []
+        for doc in added:
+            left, right = st.columns([4, 1])
+            left.caption(f"{doc['doc_id']} · {doc['title']} · {doc['chunks']} chunks")
+            if right.button("✕", key=f"remove-{doc['doc_id']}", help="Remove this document"):
+                knowledge.remove(doc["doc_id"])
+                st.rerun()
 
 
 def render_activity(log: list[str]) -> None:
@@ -116,6 +166,8 @@ with st.sidebar:
     ):
         client.reset_customer(customer_id)
         st.toast(f"{customer_id} reset to its starting state")
+
+    render_documents()
 
     if state.session:
         st.divider()

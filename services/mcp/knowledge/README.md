@@ -29,6 +29,15 @@ validates the library, embeds new or changed documents and removes retired ones.
 HTTP routes for demos and checks: `GET /health`, `GET /v1/documents`,
 `GET /v1/search?q=...&agent=...&tech=...&kind=...`.
 
+Document upload (not MCP tools, so agents cannot use them):
+
+- `POST /v1/documents/upload` - multipart field `file` (`.pdf .docx .pptx .html .md`, max 15 MB),
+  optional `title` and `agents` (comma-separated). Non-Markdown files are converted by Docling
+  (`DOCLING_URL`); the result is stored as reference document `KB-UPL-nnn` (`201` with id, version,
+  sections, chunks). `415` unsupported type, `413` too large, `422` no usable text, `502` the
+  document processor failed.
+- `DELETE /v1/documents/{doc_id}` - removes an uploaded document only (`403` for library documents).
+
 ```bash
 uv run pytest services/mcp/knowledge libs/knowledge-base      # in-memory store
 RUN_PG_TESTS=1 uv run pytest libs/knowledge-base               # also Postgres + pgvector

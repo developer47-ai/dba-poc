@@ -829,6 +829,7 @@ dependencies = [
     { name = "knowledge-base" },
     { name = "mcp" },
     { name = "poc-common" },
+    { name = "python-multipart" },
     { name = "sop-kit" },
 ]
 
@@ -838,6 +839,7 @@ requires-dist = [
     { name = "knowledge-base", editable = "libs/knowledge-base" },
     { name = "mcp", specifier = ">=1.9,<2" },
     { name = "poc-common", editable = "libs/poc-common" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "sop-kit", editable = "libs/sop-kit" },
 ]
 
