@@ -20,7 +20,7 @@ x-service-env: &service-env
   INHOME_AGENT_URL: http://inhome-agent:8201
   ACCESS_PON_AGENT_URL: http://access-pon-agent:8202
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
-  JAEGER_UI_URL: http://localhost:${JAEGER_UI_PORT:-16686}
+  JAEGER_UI_URL: ${JAEGER_UI_URL:-http://localhost:${JAEGER_UI_PORT:-16686}}
   ORCHESTRATOR_URL: http://orchestrator:8000
   DATABASE_URL: postgresql://${POSTGRES_USER:-dba}:${POSTGRES_PASSWORD:-dba_local_pw}@postgres:5432/${POSTGRES_DB:-dba}
   KNOWLEDGE_DIR: /app/knowledge
@@ -47,6 +47,10 @@ services:
     environment:
       <<: *service-env
       STREAMLIT_SERVER_ADDRESS: 0.0.0.0
+      # Behind a proxy such as GitHub Codespaces uploads fail with these checks on; the devcontainer
+      # switches them off, a local start keeps them on.
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: ${STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION:-true}
+      STREAMLIT_SERVER_ENABLE_CORS: ${STREAMLIT_SERVER_ENABLE_CORS:-true}
     depends_on:
       orchestrator: { condition: service_healthy }
     healthcheck:

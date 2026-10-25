@@ -63,17 +63,16 @@ jobs:
       - name: Validate compose file
         run: docker compose config --quiet
 
-      - name: Start platform (Ollama, Postgres + pgvector, Valkey)
-        run: docker compose up -d --wait ollama postgres valkey
+      # Exactly what the README tells a newcomer to run on a fresh clone. Compose pulls the
+      # images, builds ours, downloads the models and starts everything in dependency order.
+      - name: Quick start from the README (docker compose up -d)
+        run: docker compose up -d
 
-      - name: Download models
-        run: docker compose run --rm ollama-init
+      - name: Containers after the quick start
+        run: docker compose ps --all
 
       - name: Smoke test
         run: bash scripts/smoke-test.sh
-
-      - name: Build and start the whole product
-        run: docker compose up -d --build
 
       - name: End-to-end troubleshooting conversation (real model, streamed)
         env:

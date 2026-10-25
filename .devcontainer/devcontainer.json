@@ -10,12 +10,17 @@
     "storage": "32gb"
   },
   "postCreateCommand": "python -m pip install --user --quiet uv && python -m uv sync --python 3.12 --extra llm --all-packages",
-  "postStartCommand": "echo 'Start the platform with: docker compose up -d   then: bash scripts/smoke-test.sh'",
-  "forwardPorts": [8501, 8000, 11434],
+  "postStartCommand": "echo 'Start the platform with: docker compose up -d   (first start takes 10-30 minutes), then open port 8501'",
+  "forwardPorts": [8501, 16686, 8000],
+  "remoteEnv": {
+    "JAEGER_UI_URL": "https://${containerEnv:CODESPACE_NAME}-16686.${containerEnv:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}",
+    "STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION": "false",
+    "STREAMLIT_SERVER_ENABLE_CORS": "false"
+  },
   "portsAttributes": {
     "8501": { "label": "Chat UI", "onAutoForward": "openBrowser" },
-    "8000": { "label": "Orchestrator API", "onAutoForward": "silent" },
-    "11434": { "label": "Ollama", "onAutoForward": "silent" }
+    "16686": { "label": "Jaeger traces", "onAutoForward": "silent" },
+    "8000": { "label": "Orchestrator API", "onAutoForward": "silent" }
   },
   "customizations": {
     "vscode": {
