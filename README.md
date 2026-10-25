@@ -79,6 +79,8 @@ scope, procedures and tools. Routing is rule-based and auditable: an SOP names t
 the customer's carrier technology decides. Agents never talk to each other directly; every
 hand-over goes through the orchestrator.
 
+Want the full picture? [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md) explains the agents and orchestration, SOPs, MCP tools, human approval, the RAG pipeline (hybrid search and Reciprocal Rank Fusion), how the LLM context is built, memory, observability, deployment and what is planned.
+
 ## Quick start
 
 ### Requirements
@@ -279,7 +281,7 @@ dba-poc/
 - **Traces:** the W3C `traceparent` header carries one trace from the orchestrator through the
   agents. Tracing is off when `OTEL_EXPORTER_OTLP_ENDPOINT` is not set.
 
-More detail per service: [orchestrator](services/orchestrator-agent/README.md),
+Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). More detail per service: [orchestrator](services/orchestrator-agent/README.md),
 [In-Home agent](services/agents/inhome/README.md),
 [Access-PON agent](services/agents/access-pon/README.md),
 [knowledge MCP](services/mcp/knowledge/README.md).
